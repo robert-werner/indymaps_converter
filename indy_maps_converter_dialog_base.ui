@@ -1,67 +1,137 @@
-<ui version="4.0" >
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
  <class>IndyMapsConverterDialogBase</class>
- <widget class="QDialog" name="IndyMapsConverterDialogBase" >
-  <property name="geometry" >
+ <widget class="QDialog" name="IndyMapsConverterDialogBase">
+  <property name="geometry">
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>400</width>
-    <height>300</height>
+    <width>705</width>
+    <height>188</height>
    </rect>
   </property>
-  <property name="windowTitle" >
+  <property name="windowTitle">
    <string>Indy Maps Converter</string>
   </property>
-  <widget class="QDialogButtonBox" name="button_box" >
-   <property name="geometry" >
+  <widget class="QWidget" name="gridLayoutWidget">
+   <property name="geometry">
     <rect>
-     <x>30</x>
-     <y>240</y>
-     <width>341</width>
-     <height>32</height>
+     <x>-10</x>
+     <y>0</y>
+     <width>721</width>
+     <height>541</height>
     </rect>
    </property>
-   <property name="orientation" >
-    <enum>Qt::Horizontal</enum>
-   </property>
-   <property name="standardButtons" >
-    <set>QDialogButtonBox::Cancel|QDialogButtonBox::Ok</set>
-   </property>
+   <layout class="QGridLayout" name="gridLayout">
+    <item row="0" column="0">
+     <widget class="QTabWidget" name="tabWidget">
+      <property name="currentIndex">
+       <number>1</number>
+      </property>
+      <widget class="QWidget" name="importTab">
+       <attribute name="title">
+        <string>Import</string>
+       </attribute>
+       <widget class="QWidget" name="gridLayoutWidget_2">
+        <property name="geometry">
+         <rect>
+          <x>30</x>
+          <y>30</y>
+          <width>661</width>
+          <height>54</height>
+         </rect>
+        </property>
+        <layout class="QGridLayout" name="inputFileGrid">
+         <item row="0" column="0">
+          <widget class="QLabel" name="inputFileLabel">
+           <property name="text">
+            <string>IndyMaps input file:</string>
+           </property>
+          </widget>
+         </item>
+         <item row="0" column="1">
+          <widget class="QgsFileWidget" name="inputFileQgsWidget"/>
+         </item>
+        </layout>
+       </widget>
+       <widget class="QWidget" name="gridLayoutWidget_3">
+        <property name="geometry">
+         <rect>
+          <x>30</x>
+          <y>100</y>
+          <width>661</width>
+          <height>41</height>
+         </rect>
+        </property>
+        <layout class="QGridLayout" name="importGrid">
+         <item row="0" column="0">
+          <widget class="QPushButton" name="importButton">
+           <property name="text">
+            <string>Import</string>
+           </property>
+          </widget>
+         </item>
+        </layout>
+       </widget>
+      </widget>
+      <widget class="QWidget" name="exportTab">
+       <attribute name="title">
+        <string>Export</string>
+       </attribute>
+       <widget class="QWidget" name="gridLayoutWidget_4">
+        <property name="geometry">
+         <rect>
+          <x>30</x>
+          <y>20</y>
+          <width>661</width>
+          <height>51</height>
+         </rect>
+        </property>
+        <layout class="QGridLayout" name="exportFileGrid">
+         <item row="0" column="1">
+          <widget class="QgsFileWidget" name="exportFileQgsWidget"/>
+         </item>
+         <item row="0" column="0">
+          <widget class="QLabel" name="exportFileLabel">
+           <property name="text">
+            <string>IndyMaps output file:</string>
+           </property>
+          </widget>
+         </item>
+        </layout>
+       </widget>
+       <widget class="QWidget" name="gridLayoutWidget_5">
+        <property name="geometry">
+         <rect>
+          <x>30</x>
+          <y>90</y>
+          <width>661</width>
+          <height>51</height>
+         </rect>
+        </property>
+        <layout class="QGridLayout" name="exportGrid">
+         <item row="0" column="0">
+          <widget class="QPushButton" name="exportButton">
+           <property name="text">
+            <string>Export</string>
+           </property>
+          </widget>
+         </item>
+        </layout>
+       </widget>
+      </widget>
+     </widget>
+    </item>
+   </layout>
   </widget>
  </widget>
+ <customwidgets>
+  <customwidget>
+   <class>QgsFileWidget</class>
+   <extends>QWidget</extends>
+   <header>qgsfilewidget.h</header>
+  </customwidget>
+ </customwidgets>
  <resources/>
- <connections>
-  <connection>
-   <sender>button_box</sender>
-   <signal>accepted()</signal>
-   <receiver>IndyMapsConverterDialogBase</receiver>
-   <slot>accept()</slot>
-   <hints>
-    <hint type="source_label" >
-     <x>248</x>
-     <y>254</y>
-    </hint>
-    <hint type="destination_label" >
-     <x>157</x>
-     <y>274</y>
-    </hint>
-   </hints>
-  </connection>
-  <connection>
-   <sender>button_box</sender>
-   <signal>rejected()</signal>
-   <receiver>IndyMapsConverterDialogBase</receiver>
-   <slot>reject()</slot>
-   <hints>
-    <hint type="source_label" >
-     <x>316</x>
-     <y>260</y>
-    </hint>
-    <hint type="destination_label" >
-     <x>286</x>
-     <y>274</y>
-    </hint>
-   </hints>
-  </connection>
- </connections>
+ <connections/>
 </ui>
