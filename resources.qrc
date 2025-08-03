@@ -1,0 +1,5 @@
+<RCC>
+    <qresource prefix="/plugins/indy_maps_converter" >
+        <file>icon.png</file>
+    </qresource>
+</RCC>
