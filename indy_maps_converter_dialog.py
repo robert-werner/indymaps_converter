@@ -24,8 +24,12 @@
 
 import os
 
+from cbor2 import load
 from qgis.PyQt import uic
 from qgis.PyQt import QtWidgets
+
+from qgis.core import QgsProject, QgsCoordinateReferenceSystem, QgsRectangle, QgsReferencedRectangle, QgsPointXY, QgsGeometry, QgsPolygon, QgsVectorLayer, QgsFeature
+from qgis.utils import iface
 
 # This loads your .ui file so that PyQt can populate your plugin with the elements from Qt Designer
 FORM_CLASS, _ = uic.loadUiType(os.path.join(
@@ -46,9 +50,57 @@ class IndyMapsConverterDialog(QtWidgets.QDialog, FORM_CLASS):
         self.importButton.clicked.connect(self.import_imx)
         self.exportButton.clicked.connect(self.export_imx)
 
+        self.canvas = iface.mapCanvas()
+        self.iface = iface
+
     def import_imx(self):
         imx_path = self.inputFileQgsWidget.filePath()
-        ...
+
+        project = QgsProject.instance()
+        crs = QgsCoordinateReferenceSystem('EPSG:3857')
+
+
+        with open(imx_path, 'rb') as fp:
+            obj = load(fp)
+            border = obj['borders'][0]
+            classes = obj['classes']
+            settings = obj['settings']
+
+            xs = [pt[0] for pt in border]
+            ys = [pt[1] for pt in border]
+
+            # Compute min and max for x and y
+            xmin, xmax = min(xs), max(xs)
+            ymin, ymax = min(ys), max(ys)
+
+            rectangle = QgsRectangle(xmin, ymin, xmax, ymax)
+
+            referenced_extent = QgsReferencedRectangle(rectangle, crs)
+
+            project.viewSettings().setPresetFullExtent(referenced_extent)
+
+            self.canvas.refresh()
+
+            for cls in classes:
+                rings = []
+                if len(cls['objects']) > 0:
+                    for ring_points in cls['objects'][0][0]:
+                        # Convert each sublist of [x, y] to QgsPointXY objects
+                        qgs_points = [QgsPointXY(x, y) for x, y in ring_points]
+                        rings.append(qgs_points)
+
+                        # Create a QgsGeometry polygon from the rings (first ring is exterior, others are interiors/holes)
+                    polygon_geom = QgsGeometry.fromPolygonXY(rings)
+
+                        # To visualize, add to a new memory layer
+                    layer = QgsVectorLayer("Polygon?crs=EPSG:3857", "Converted Polygon", "memory")
+                    feature = QgsFeature()
+                    feature.setGeometry(polygon_geom)
+                    layer.dataProvider().addFeatures([feature])
+                    QgsProject.instance().addMapLayer(layer)
+                    self.canvas.refresh()
+
+
 
     def export_imx(self):
         ...
