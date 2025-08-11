@@ -57,7 +57,7 @@ class IndyMapsConverterDialog(QtWidgets.QDialog, FORM_CLASS):
         imx_path = self.inputFileQgsWidget.filePath()
 
         project = QgsProject.instance()
-        crs = QgsCoordinateReferenceSystem('EPSG:3857')
+        crs = QgsCoordinateReferenceSystem('EPSG:4326')
 
 
         with open(imx_path, 'rb') as fp:
@@ -66,8 +66,8 @@ class IndyMapsConverterDialog(QtWidgets.QDialog, FORM_CLASS):
             classes = obj['classes']
             settings = obj['settings']
 
-            xs = [pt[0] for pt in border]
-            ys = [pt[1] for pt in border]
+            xs = [pt[0] / settings['from_degs_mul'] for pt in border]
+            ys = [pt[1] / settings['from_degs_mul'] for pt in border]
 
             # Compute min and max for x and y
             xmin, xmax = min(xs), max(xs)
@@ -82,23 +82,14 @@ class IndyMapsConverterDialog(QtWidgets.QDialog, FORM_CLASS):
             self.canvas.refresh()
 
             for cls in classes:
-                rings = []
-                if len(cls['objects']) > 0:
-                    for ring_points in cls['objects'][0][0]:
-                        # Convert each sublist of [x, y] to QgsPointXY objects
-                        qgs_points = [QgsPointXY(x, y) for x, y in ring_points]
-                        rings.append(qgs_points)
-
-                        # Create a QgsGeometry polygon from the rings (first ring is exterior, others are interiors/holes)
-                    polygon_geom = QgsGeometry.fromPolygonXY(rings)
-
-                        # To visualize, add to a new memory layer
-                    layer = QgsVectorLayer("Polygon?crs=EPSG:3857", "Converted Polygon", "memory")
-                    feature = QgsFeature()
-                    feature.setGeometry(polygon_geom)
-                    layer.dataProvider().addFeatures([feature])
-                    QgsProject.instance().addMapLayer(layer)
-                    self.canvas.refresh()
+                if cls['type'] == 0: # Then it is None, continue iteration
+                    continue
+                if cls['type'] == 1: # Then it is point
+                    print(cls['id'], ': Points')
+                if cls['type'] == 2: # Then it is line
+                    print(cls['id'], ': Lines')
+                if cls['type'] == 3: # Then it is multipolygon
+                    print(cls['id'], ': Polygons')
 
 
 
