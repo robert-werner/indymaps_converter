@@ -9,7 +9,7 @@ description=This plugin imports/exports the QGIS project to the IndyMaps format 
 version=0.1
 author=Leonid Kolesnichenko
 email=xperience439@gmail.com
-
+plugin_dependencies=qpip
 about=This plugin imports/exports the IndyMaps format files to the QGIS projects and vice versa.
 
 tracker=https://github.com/robert-werner/indymaps_converter/issues

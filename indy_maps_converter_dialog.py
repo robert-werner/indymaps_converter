@@ -42,3 +42,13 @@ class IndyMapsConverterDialog(QtWidgets.QDialog, FORM_CLASS):
         # http://qt-project.org/doc/qt-4.8/designer-using-a-ui-file.html
         # #widgets-and-dialogs-with-auto-connect
         self.setupUi(self)
+
+        self.importButton.clicked.connect(self.import_imx)
+        self.exportButton.clicked.connect(self.export_imx)
+
+    def import_imx(self):
+        imx_path = self.inputFileQgsWidget.filePath()
+        ...
+
+    def export_imx(self):
+        ...
