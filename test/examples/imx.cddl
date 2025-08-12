@@ -1,0 +1,76 @@
+; CDDL description of imx format.
+;
+; For more information about CDDL see rfc8610
+; https://www.rfc-editor.org/rfc/rfc8610.html
+
+map = {
+    settings: settings,
+    borders: [* polygon],
+    classes: [* class],
+}
+
+settings = {
+	min_mip: float64,
+	max_mip: float64,
+	compression_policy: int,
+	from_degs_mul: float64,
+}
+
+class = {
+    id: tstr,
+    objects: [* object],
+    shape: &shape-type,                 ; shape of objects, an object with class of default value None shape isn't displayed
+    ? parent-id: tstr    .default "",
+    ? style: &class-type .default 0,    ; border style, means nothing for point, default is solid
+    ? layer: int         .default 0,
+    ? width: float64     .default 0.2,  ; in mm
+    ? min-mip: float64   .default 0,    ; mip stands for meters in pixel, if max-mip == min-mip == 0 object is always visible
+    ? max-mip: float64   .default 0,    ; mip stands for meters in pixel, if max-mip == min-mip == 0 object is always visible
+    ? line-color: rgba   .default 0,    ; border line color in rgba format
+    ? fill-color: rgba   .default 0,    ; fill color in rgba format
+    ? text-color: rgba   .default 0,    ; text color in rgba format
+    ? image: bytes,                     ; image in arbitrary format
+    ? attributes: Attributes,
+}
+
+
+rgba = uint                             ; color representation in rgba format
+
+class-type = (
+	   "Solid"   : 0,
+	   "Dash"    : 1,
+	   "DashDot" : 2,
+	   "BDiag"   : 3,
+	   "FDiag"   : 4,
+	   "Horiz"   : 5,
+	   "Vert"    : 6,
+	   "Dots"    : 7,
+)
+
+shape-type = (
+	   None    : 0,
+	   Point   : 1,
+	   Line    : 2,
+	   Polygon : 3,
+)
+
+object = [
+    outer-polygons: [* polygon],   ; see https://wiki.openstreetmap.org/wiki/Relation:multipolygon
+    inner-polygons: [* polygon],   ; see https://wiki.openstreetmap.org/wiki/Relation:multipolygon
+    attributes: attributes,        ; if attribute 'name' is set it is visible on a map;
+                                   ; if attribute 'name:<locale_value>' is set it will be displayed instead of the 'name' attribute
+                                   ; for users with locale 'locale_value';
+                                   ; if name isn't set the 'ref' attribute is displayed;
+                                   ; if the 'addr:housenumber' attribute is set it is displayed in addition to 'name' or 'ref'.
+                                   ; Note. The 'addr:housenumber' attribute is visible even if neither 'name' nor 'ref' are set.
+]
+
+polygon = [* point]                ; the first point stores absolute coordinates
+                                   ; other points stores relative coordinates to the first point
+
+point = [
+    lat: int,                      ; degrees, scaled by from_degs_mul, can be int8, int16 or int32
+    lon: int,                      ; degrees, scaled by from_degs_mul, can be int8, int16 or int32
+]
+
+attributes = { * tstr => any }

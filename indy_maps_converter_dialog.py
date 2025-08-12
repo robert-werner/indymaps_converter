@@ -24,11 +24,12 @@
 
 import os
 
+from PyQt5.QtCore import QMetaType
 from cbor2 import load
 from qgis.PyQt import uic
 from qgis.PyQt import QtWidgets
 
-from qgis.core import QgsProject, QgsCoordinateReferenceSystem, QgsRectangle, QgsReferencedRectangle, QgsPointXY, QgsGeometry, QgsPolygon, QgsVectorLayer, QgsFeature
+from qgis.core import QgsProject, QgsField, QgsCoordinateReferenceSystem, QgsRectangle, QgsReferencedRectangle, QgsPointXY, QgsGeometry, QgsFields, QgsVectorLayer, QgsFeature
 from qgis.utils import iface
 
 # This loads your .ui file so that PyQt can populate your plugin with the elements from Qt Designer
@@ -85,6 +86,32 @@ class IndyMapsConverterDialog(QtWidgets.QDialog, FORM_CLASS):
                 if cls['type'] == 0: # Then it is None, continue iteration
                     continue
                 if cls['type'] == 1: # Then it is point
+                    layer_name = cls['id']
+                    layer = QgsVectorLayer("Point?crs=EPSG:4326",
+                                           layer_name,
+                                           "memory")
+                    for obj in cls['objects']:
+                        geom = obj[0][0][0]
+                        attribs = obj[-1] # TODO: fix when correct imx will be sent
+                        qgs_point = QgsPointXY(geom[1] / settings['from_degs_mul'], geom[0] / settings['from_degs_mul'])
+                        qgs_geometry = QgsGeometry.fromPointXY(qgs_point)
+
+                        for attrib in attribs.items():
+                            layer.dataProvider().addAttributes([
+                                QgsField(attrib[0], QMetaType.Type.QString)
+                            ])
+                        layer.updateFields()
+
+                        feature = QgsFeature(layer.fields())
+
+                        attr_list = [attribs.get(field.name()) for field in layer.fields()]
+                        feature.setAttributes(attr_list)
+
+                        feature.setGeometry(qgs_geometry)
+
+                        layer.dataProvider().addFeature(feature)
+                        QgsProject.instance().addMapLayer(layer)
+                        self.canvas.refresh()
                     print(cls['id'], ': Points')
                 if cls['type'] == 2: # Then it is line
                     print(cls['id'], ': Lines')
