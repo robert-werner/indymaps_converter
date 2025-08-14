@@ -25,11 +25,12 @@
 import os
 
 from PyQt5.QtCore import QMetaType
+from PyQt5.QtGui import QColor
 from cbor2 import load
 from qgis.PyQt import uic
 from qgis.PyQt import QtWidgets
 
-from qgis.core import QgsProject, QgsField, QgsCoordinateReferenceSystem, QgsRectangle, QgsReferencedRectangle, QgsPointXY, QgsGeometry, QgsFields, QgsVectorLayer, QgsFeature
+from qgis.core import QgsProject, Qgis, QgsField, QgsCoordinateReferenceSystem, QgsRectangle, QgsReferencedRectangle, QgsPointXY, QgsGeometry, QgsFields, QgsVectorLayer, QgsFeature
 from qgis.utils import iface
 
 # This loads your .ui file so that PyQt can populate your plugin with the elements from Qt Designer
@@ -67,8 +68,8 @@ class IndyMapsConverterDialog(QtWidgets.QDialog, FORM_CLASS):
             classes = obj['classes']
             settings = obj['settings']
 
-            xs = [pt[0] / settings['from_degs_mul'] for pt in border]
-            ys = [pt[1] / settings['from_degs_mul'] for pt in border]
+            xs = [pt[1] / settings['from-degs-mul'] for pt in border]
+            ys = [pt[0] / settings['from-degs-mul'] for pt in border]
 
             # Compute min and max for x and y
             xmin, xmax = min(xs), max(xs)
@@ -83,17 +84,23 @@ class IndyMapsConverterDialog(QtWidgets.QDialog, FORM_CLASS):
             self.canvas.refresh()
 
             for cls in classes:
-                if cls['type'] == 0: # Then it is None, continue iteration
-                    continue
-                if cls['type'] == 1: # Then it is point
+                if cls['shape'] == 1: # Then it is point
                     layer_name = cls['id']
                     layer = QgsVectorLayer("Point?crs=EPSG:4326",
                                            layer_name,
                                            "memory")
+                    symbol = layer.renderer().symbol()
+                    symbol.setSizeUnit(Qgis.RenderUnit.Millimeters)  # switch to millimeters
+                    rgba_color = cls['fill-color'] & 0xff, cls['fill-color'] >> 8 & 0xff, cls['fill-color'] >> 16 & 0xff, cls['fill-color'] >> 32 & 0xff
+                    symbol.setColor(QColor.fromRgb(*rgba_color))
+                    symbol.setSize(cls['width'])
                     for obj in cls['objects']:
                         geom = obj[0][0][0]
                         attribs = obj[-1] # TODO: fix when correct imx will be sent
-                        qgs_point = QgsPointXY(geom[1] / settings['from_degs_mul'], geom[0] / settings['from_degs_mul'])
+
+
+                        qgs_point = QgsPointXY(geom[1] / settings['from-degs-mul'],
+                                               geom[0] /settings['from-degs-mul'])
                         qgs_geometry = QgsGeometry.fromPointXY(qgs_point)
 
                         for attrib in attribs.items():
@@ -112,10 +119,53 @@ class IndyMapsConverterDialog(QtWidgets.QDialog, FORM_CLASS):
                         layer.dataProvider().addFeature(feature)
                         QgsProject.instance().addMapLayer(layer)
                         self.canvas.refresh()
-                    print(cls['id'], ': Points')
-                if cls['type'] == 2: # Then it is line
+                if cls['shape'] == 2: # Then it is line
                     print(cls['id'], ': Lines')
-                if cls['type'] == 3: # Then it is multipolygon
+                    layer_name = cls['id']
+                    layer = QgsVectorLayer("LineString?crs=EPSG:4326",
+                                           layer_name,
+                                           "memory")
+                    symbol = layer.renderer().symbol()
+                    symbol.setWidthUnit(Qgis.RenderUnit.Millimeters)  # switch to millimeters
+                    rgba_color = cls['line-color'] & 0xff,
+                    cls['line-color'] >> 8 & 0xff,
+                    cls['line-color'] >> 16 & 0xff,
+                    cls['line-color'] >> 32 & 0xff
+                    symbol.setColor(QColor.fromRgb(*rgba_color))
+                    symbol.setWidth(cls['width'])
+
+                    for obj in cls['objects']:
+                        geom = obj[0][0]
+                        attribs = obj[-1] # TODO: fix when correct imx will be sent
+
+                        points = []
+                        for _geom in geom:
+                            print(geom)
+                            qgs_point = QgsPointXY(_geom[1] / settings['from-degs-mul'],
+                                                   _geom[0] / settings['from-degs-mul'])
+                            points.append(qgs_point)
+
+
+
+                        qgs_geometry = QgsGeometry.fromPolylineXY(points)
+
+                        for attrib in attribs.items():
+                            layer.dataProvider().addAttributes([
+                                QgsField(attrib[0], QMetaType.Type.QString)
+                            ])
+                        layer.updateFields()
+
+                        feature = QgsFeature(layer.fields())
+
+                        attr_list = [attribs.get(field.name()) for field in layer.fields()]
+                        feature.setAttributes(attr_list)
+
+                        feature.setGeometry(qgs_geometry)
+
+                        layer.dataProvider().addFeature(feature)
+                        QgsProject.instance().addMapLayer(layer)
+                        self.canvas.refresh()
+                if cls['shape'] == 3: # Then it is multipolygon
                     print(cls['id'], ': Polygons')
 
 
