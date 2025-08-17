@@ -162,7 +162,7 @@ class IndyMapsConverterDialog(QtWidgets.QDialog, FORM_CLASS):
                         layer.dataProvider().addFeature(feature)
                         QgsProject.instance().addMapLayer(layer)
                         self.canvas.refresh()
-                if cls['shape'] == 9: # Then it is multipolygon
+                if cls['shape'] == 3: # Then it is multipolygon
                     print(cls['id'], ': Polygons')
                     layer_name = cls['id']
                     layer = QgsVectorLayer("Polygon?crs=EPSG:4326",
@@ -183,7 +183,7 @@ class IndyMapsConverterDialog(QtWidgets.QDialog, FORM_CLASS):
                             y = (starting_point[1] + y) / settings['from-degs-mul']
                             points.append(QgsPointXY(y, x))
 
-                        qgs_geometry = QgsGeometry.fromPolygonXY(points)
+                        qgs_geometry = QgsGeometry.fromPolygonXY([points])
 
                         for attrib in attribs.items():
                             layer.dataProvider().addAttributes([
