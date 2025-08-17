@@ -162,8 +162,45 @@ class IndyMapsConverterDialog(QtWidgets.QDialog, FORM_CLASS):
                         layer.dataProvider().addFeature(feature)
                         QgsProject.instance().addMapLayer(layer)
                         self.canvas.refresh()
-                if cls['shape'] == 3: # Then it is multipolygon
+                if cls['shape'] == 9: # Then it is multipolygon
                     print(cls['id'], ': Polygons')
+                    layer_name = cls['id']
+                    layer = QgsVectorLayer("Polygon?crs=EPSG:4326",
+                                           layer_name,
+                                           "memory")
+                    symbol = layer.renderer().symbol()
+
+                    # TODO: styling
+
+                    for obj in cls['objects']:
+                        attribs = obj[-1]
+                        points = []
+                        geom = obj[0]
+                        starting_point = geom[0][0]
+                        points.append(QgsPointXY(starting_point[1] / settings['from-degs-mul'], starting_point[0] / settings['from-degs-mul']))
+                        for x, y in geom[0][1:]:
+                            x = (starting_point[0] + x) / settings['from-degs-mul']
+                            y = (starting_point[1] + y) / settings['from-degs-mul']
+                            points.append(QgsPointXY(y, x))
+
+                        qgs_geometry = QgsGeometry.fromPolygonXY(points)
+
+                        for attrib in attribs.items():
+                            layer.dataProvider().addAttributes([
+                                QgsField(attrib[0], QMetaType.Type.QString)
+                            ])
+                        layer.updateFields()
+
+                        feature = QgsFeature(layer.fields())
+
+                        attr_list = [attribs.get(field.name()) for field in layer.fields()]
+                        feature.setAttributes(attr_list)
+
+                        feature.setGeometry(qgs_geometry)
+
+                        layer.dataProvider().addFeature(feature)
+                        QgsProject.instance().addMapLayer(layer)
+                        self.canvas.refresh()
 
 
 
