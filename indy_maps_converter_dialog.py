@@ -135,17 +135,14 @@ class IndyMapsConverterDialog(QtWidgets.QDialog, FORM_CLASS):
                     symbol.setWidth(cls['width'])
 
                     for obj in cls['objects']:
-                        geom = obj[0][0]
-                        attribs = obj[-1] # TODO: fix when correct imx will be sent
-
+                        attribs = obj[-1]
                         points = []
-                        for _geom in geom:
-                            print(geom)
-                            qgs_point = QgsPointXY(_geom[1] / settings['from-degs-mul'],
-                                                   _geom[0] / settings['from-degs-mul'])
-                            points.append(qgs_point)
-
-
+                        geom = obj[0]
+                        starting_point = geom[0][0]
+                        for x, y in geom[0][1:]:
+                            x = (starting_point[0] + x) / settings['from-degs-mul']
+                            y = (starting_point[1] + y) / settings['from-degs-mul']
+                            points.append(QgsPointXY(y, x))
 
                         qgs_geometry = QgsGeometry.fromPolylineXY(points)
 
