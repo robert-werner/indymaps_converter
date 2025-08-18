@@ -91,7 +91,7 @@ class IndyMapsConverterDialog(QtWidgets.QDialog, FORM_CLASS):
                                            "memory")
                     symbol = layer.renderer().symbol()
                     symbol.setSizeUnit(Qgis.RenderUnit.Millimeters)  # switch to millimeters
-                    rgba_color = cls['fill-color'] & 0xff, cls['fill-color'] >> 8 & 0xff, cls['fill-color'] >> 16 & 0xff, cls['fill-color'] >> 32 & 0xff
+                    rgba_color = (cls['fill-color'] >> 16) & 0xff, (cls['fill-color'] >> 8) & 0xff, (cls['fill-color']) & 0xff, (cls['fill-color'] >> 24) & 0xff
                     symbol.setColor(QColor.fromRgb(*rgba_color))
                     symbol.setSize(cls['width'])
                     for obj in cls['objects']:
@@ -127,10 +127,7 @@ class IndyMapsConverterDialog(QtWidgets.QDialog, FORM_CLASS):
                                            "memory")
                     symbol = layer.renderer().symbol()
                     symbol.setWidthUnit(Qgis.RenderUnit.Millimeters)  # switch to millimeters
-                    rgba_color = cls['line-color'] & 0xff,
-                    cls['line-color'] >> 8 & 0xff,
-                    cls['line-color'] >> 16 & 0xff,
-                    cls['line-color'] >> 32 & 0xff
+                    rgba_color = (cls['line-color'] >> 16) & 0xff, (cls['line-color'] >> 8) & 0xff, (cls['line-color']) & 0xff, (cls['line-color'] >> 24) & 0xff
                     symbol.setColor(QColor.fromRgb(*rgba_color))
                     symbol.setWidth(cls['width'])
 
@@ -169,8 +166,7 @@ class IndyMapsConverterDialog(QtWidgets.QDialog, FORM_CLASS):
                                            layer_name,
                                            "memory")
                     symbol = layer.renderer().symbol()
-                    rgba_color = cls['fill-color'] & 0xff, cls['fill-color'] >> 8 & 0xff, cls[
-                        'fill-color'] >> 16 & 0xff, cls['fill-color'] >> 32 & 0xff
+                    rgba_color = (cls['fill-color'] >> 16) & 0xff, (cls['fill-color'] >> 8) & 0xff, (cls['fill-color']) & 0xff, (cls['fill-color'] >> 24) & 0xff
                     symbol.setColor(QColor.fromRgb(*rgba_color))  # Fill color
                     symbol.symbolLayer(0).setStrokeWidth(cls['width'])  # in millimeters
 
