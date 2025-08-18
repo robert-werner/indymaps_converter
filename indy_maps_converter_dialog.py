@@ -83,16 +83,19 @@ class IndyMapsConverterDialog(QtWidgets.QDialog, FORM_CLASS):
 
             self.canvas.refresh()
 
+            layers_to_add = {}
+
             for cls in classes:
                 if cls['shape'] == 1: # Then it is point
                     layer_name = cls['id']
+                    layer_order = cls['layer']
                     layer = QgsVectorLayer("Point?crs=EPSG:4326",
                                            layer_name,
                                            "memory")
                     symbol = layer.renderer().symbol()
                     symbol.setSizeUnit(Qgis.RenderUnit.Millimeters)  # switch to millimeters
-                    rgba_color = (cls['fill-color'] >> 16) & 0xff, (cls['fill-color'] >> 8) & 0xff, (cls['fill-color']) & 0xff, (cls['fill-color'] >> 24) & 0xff
-                    symbol.setColor(QColor.fromRgb(*rgba_color))
+                    rgba_fill_color = (cls['fill-color'] >> 16) & 0xff, (cls['fill-color'] >> 8) & 0xff, (cls['fill-color']) & 0xff, (cls['fill-color'] >> 24) & 0xff
+                    symbol.setColor(QColor.fromRgb(*rgba_fill_color))
                     symbol.setSize(cls['width'])
                     for obj in cls['objects']:
                         geom = obj[0][0][0]
@@ -117,18 +120,18 @@ class IndyMapsConverterDialog(QtWidgets.QDialog, FORM_CLASS):
                         feature.setGeometry(qgs_geometry)
 
                         layer.dataProvider().addFeature(feature)
-                        QgsProject.instance().addMapLayer(layer)
-                        self.canvas.refresh()
+
+                    layers_to_add[layer_order] = layer
                 if cls['shape'] == 2: # Then it is line
-                    print(cls['id'], ': Lines')
                     layer_name = cls['id']
+                    layer_order = cls['layer']
                     layer = QgsVectorLayer("LineString?crs=EPSG:4326",
                                            layer_name,
                                            "memory")
                     symbol = layer.renderer().symbol()
                     symbol.setWidthUnit(Qgis.RenderUnit.Millimeters)  # switch to millimeters
-                    rgba_color = (cls['line-color'] >> 16) & 0xff, (cls['line-color'] >> 8) & 0xff, (cls['line-color']) & 0xff, (cls['line-color'] >> 24) & 0xff
-                    symbol.setColor(QColor.fromRgb(*rgba_color))
+                    rgba_fill_color = (cls['line-color'] >> 16) & 0xff, (cls['line-color'] >> 8) & 0xff, (cls['line-color']) & 0xff, (cls['line-color'] >> 24) & 0xff
+                    symbol.setColor(QColor.fromRgb(*rgba_fill_color))
                     symbol.setWidth(cls['width'])
 
                     for obj in cls['objects']:
@@ -157,18 +160,20 @@ class IndyMapsConverterDialog(QtWidgets.QDialog, FORM_CLASS):
                         feature.setGeometry(qgs_geometry)
 
                         layer.dataProvider().addFeature(feature)
-                        QgsProject.instance().addMapLayer(layer)
-                        self.canvas.refresh()
+
+                    layers_to_add[layer_order] = layer
                 if cls['shape'] == 3: # Then it is multipolygon
-                    print(cls['id'], ': Polygons')
                     layer_name = cls['id']
+                    layer_order = cls['layer']
                     layer = QgsVectorLayer("Polygon?crs=EPSG:4326",
                                            layer_name,
                                            "memory")
                     symbol = layer.renderer().symbol()
-                    rgba_color = (cls['fill-color'] >> 16) & 0xff, (cls['fill-color'] >> 8) & 0xff, (cls['fill-color']) & 0xff, (cls['fill-color'] >> 24) & 0xff
-                    symbol.setColor(QColor.fromRgb(*rgba_color))  # Fill color
+                    rgba_fill_color = (cls['fill-color'] >> 16) & 0xff, (cls['fill-color'] >> 8) & 0xff, (cls['fill-color']) & 0xff, (cls['fill-color'] >> 24) & 0xff
+                    rgba_stroke_color = (cls['line-color'] >> 16) & 0xff, (cls['line-color'] >> 8) & 0xff, (cls['line-color']) & 0xff, (cls['line-color'] >> 24) & 0xff
+                    symbol.setColor(QColor.fromRgb(*rgba_fill_color))  # Fill color
                     symbol.symbolLayer(0).setStrokeWidth(cls['width'])  # in millimeters
+                    symbol.symbolLayer(0).setStrokeColor(QColor.fromRgb(*rgba_stroke_color))
 
                     for obj in cls['objects']:
                         attribs = obj[-1]
@@ -197,8 +202,14 @@ class IndyMapsConverterDialog(QtWidgets.QDialog, FORM_CLASS):
                         feature.setGeometry(qgs_geometry)
 
                         layer.dataProvider().addFeature(feature)
-                        QgsProject.instance().addMapLayer(layer)
-                        self.canvas.refresh()
+
+                    layers_to_add[layer_order] = layer
+
+        sorted_layers = dict(sorted(layers_to_add.items()))
+
+        for layer in sorted_layers.values():
+            QgsProject.instance().addMapLayer(layer)
+            self.canvas.refresh()
 
 
 
