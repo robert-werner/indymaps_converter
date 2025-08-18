@@ -169,8 +169,10 @@ class IndyMapsConverterDialog(QtWidgets.QDialog, FORM_CLASS):
                                            layer_name,
                                            "memory")
                     symbol = layer.renderer().symbol()
-
-                    # TODO: styling
+                    rgba_color = cls['fill-color'] & 0xff, cls['fill-color'] >> 8 & 0xff, cls[
+                        'fill-color'] >> 16 & 0xff, cls['fill-color'] >> 32 & 0xff
+                    symbol.setColor(QColor.fromRgb(*rgba_color))  # Fill color
+                    symbol.symbolLayer(0).setStrokeWidth(cls['width'])  # in millimeters
 
                     for obj in cls['objects']:
                         attribs = obj[-1]
