@@ -56,7 +56,10 @@ class IndyMapsConverterDialog(QtWidgets.QDialog, FORM_CLASS):
         self.iface = iface
 
     def import_imx(self):
+        self.importButton.setEnabled(False)
         imx_path = self.inputFileQgsWidget.filePath()
+
+        self.importProgressBar.setValue(0)
 
         project = QgsProject.instance()
         crs = QgsCoordinateReferenceSystem('EPSG:4326')
@@ -86,6 +89,7 @@ class IndyMapsConverterDialog(QtWidgets.QDialog, FORM_CLASS):
             layers_to_add = {}
 
             for cls in classes:
+                self.importProgressLabel.setText(f"Preprocessing layer: {cls['id']}")
                 if cls['shape'] == 1: # Then it is point
                     layer_name = cls['id']
                     layer_order = cls['layer']
@@ -106,16 +110,7 @@ class IndyMapsConverterDialog(QtWidgets.QDialog, FORM_CLASS):
                                                geom[0] /settings['from-degs-mul'])
                         qgs_geometry = QgsGeometry.fromPointXY(qgs_point)
 
-                        for attrib in attribs.items():
-                            layer.dataProvider().addAttributes([
-                                QgsField(attrib[0], QMetaType.Type.QString)
-                            ])
-                        layer.updateFields()
-
-                        feature = QgsFeature(layer.fields())
-
-                        attr_list = [attribs.get(field.name()) for field in layer.fields()]
-                        feature.setAttributes(attr_list)
+                        feature = self._attribute_feature(attribs, layer)
 
                         feature.setGeometry(qgs_geometry)
 
@@ -146,16 +141,7 @@ class IndyMapsConverterDialog(QtWidgets.QDialog, FORM_CLASS):
 
                         qgs_geometry = QgsGeometry.fromPolylineXY(points)
 
-                        for attrib in attribs.items():
-                            layer.dataProvider().addAttributes([
-                                QgsField(attrib[0], QMetaType.Type.QString)
-                            ])
-                        layer.updateFields()
-
-                        feature = QgsFeature(layer.fields())
-
-                        attr_list = [attribs.get(field.name()) for field in layer.fields()]
-                        feature.setAttributes(attr_list)
+                        feature = self._attribute_feature(attribs, layer)
 
                         feature.setGeometry(qgs_geometry)
 
@@ -188,16 +174,7 @@ class IndyMapsConverterDialog(QtWidgets.QDialog, FORM_CLASS):
 
                         qgs_geometry = QgsGeometry.fromPolygonXY([points])
 
-                        for attrib in attribs.items():
-                            layer.dataProvider().addAttributes([
-                                QgsField(attrib[0], QMetaType.Type.QString)
-                            ])
-                        layer.updateFields()
-
-                        feature = QgsFeature(layer.fields())
-
-                        attr_list = [attribs.get(field.name()) for field in layer.fields()]
-                        feature.setAttributes(attr_list)
+                        feature = self._attribute_feature(attribs, layer)
 
                         feature.setGeometry(qgs_geometry)
 
@@ -208,10 +185,23 @@ class IndyMapsConverterDialog(QtWidgets.QDialog, FORM_CLASS):
         sorted_layers = dict(sorted(layers_to_add.items()))
 
         for layer in sorted_layers.values():
+            self.importProgressBar.setValue(self.importProgressBar.value() + (100 // len(sorted_layers)))
             QgsProject.instance().addMapLayer(layer)
             self.canvas.refresh()
 
+        self.importProgressBar.setValue(100)
+        self.importButton.setEnabled(True)
 
+    def _attribute_feature(self, attributes, layer):
+        for attribute in attributes.items():
+            layer.dataProvider().addAttributes([
+                QgsField(attribute[0], QMetaType.Type.QString)
+            ])
+        layer.updateFields()
+        feature = QgsFeature(layer.fields())
+        attr_list = [attributes.get(field.name()) for field in layer.fields()]
+        feature.setAttributes(attr_list)
+        return feature
 
     def export_imx(self):
         ...
