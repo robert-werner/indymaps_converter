@@ -29,6 +29,7 @@ from PyQt5.QtGui import QColor
 from cbor2 import load
 from qgis.PyQt import uic
 from qgis.PyQt import QtWidgets
+from qgis._core import QgsPolygon
 
 from qgis.core import QgsProject, Qgis, QgsField, QgsCoordinateReferenceSystem, QgsRectangle, QgsReferencedRectangle, QgsPointXY, QgsGeometry, QgsFields, QgsVectorLayer, QgsFeature
 from qgis.utils import iface
@@ -102,19 +103,19 @@ class IndyMapsConverterDialog(QtWidgets.QDialog, FORM_CLASS):
                     symbol.setColor(QColor.fromRgb(*rgba_fill_color))
                     symbol.setSize(cls['width'])
                     for obj in cls['objects']:
-                        geom = obj[0][0][0]
+                        outer_geom = obj[0][0][0]
                         attribs = obj[-1] # TODO: fix when correct imx will be sent
 
 
-                        qgs_point = QgsPointXY(geom[1] / settings['from-degs-mul'],
-                                               geom[0] /settings['from-degs-mul'])
-                        qgs_geometry = QgsGeometry.fromPointXY(qgs_point)
+                        qgs_point = QgsPointXY(outer_geom[1] / settings['from-degs-mul'],
+                                               outer_geom[0] /settings['from-degs-mul'])
+                        outer_qgs_geometry = QgsGeometry.fromPointXY(qgs_point)
 
-                        feature = self._attribute_feature(attribs, layer)
+                        outer_feature = self._attribute_feature(attribs, layer)
 
-                        feature.setGeometry(qgs_geometry)
+                        outer_feature.setGeometry(outer_qgs_geometry)
 
-                        layer.dataProvider().addFeature(feature)
+                        layer.dataProvider().addFeature(outer_feature)
 
                     layers_to_add[layer_order] = layer
                 if cls['shape'] == 2: # Then it is line
@@ -131,21 +132,21 @@ class IndyMapsConverterDialog(QtWidgets.QDialog, FORM_CLASS):
 
                     for obj in cls['objects']:
                         attribs = obj[-1]
-                        points = []
-                        geom = obj[0]
-                        starting_point = geom[0][0]
-                        for x, y in geom[0][1:]:
-                            x = (starting_point[0] + x) / settings['from-degs-mul']
-                            y = (starting_point[1] + y) / settings['from-degs-mul']
-                            points.append(QgsPointXY(y, x))
+                        outer_geometry = []
+                        outer_geom = obj[0]
+                        outer_starting_point = outer_geom[0][0]
+                        for x, y in outer_geom[0][1:]:
+                            x = (outer_starting_point[0] + x) / settings['from-degs-mul']
+                            y = (outer_starting_point[1] + y) / settings['from-degs-mul']
+                            outer_geometry.append(QgsPointXY(y, x))
 
-                        qgs_geometry = QgsGeometry.fromPolylineXY(points)
+                        outer_qgs_geometry = QgsGeometry.fromPolylineXY(outer_geometry)
 
-                        feature = self._attribute_feature(attribs, layer)
+                        outer_feature = self._attribute_feature(attribs, layer)
 
-                        feature.setGeometry(qgs_geometry)
+                        outer_feature.setGeometry(outer_qgs_geometry)
 
-                        layer.dataProvider().addFeature(feature)
+                        layer.dataProvider().addFeature(outer_feature)
 
                     layers_to_add[layer_order] = layer
                 if cls['shape'] == 3: # Then it is multipolygon
@@ -163,22 +164,13 @@ class IndyMapsConverterDialog(QtWidgets.QDialog, FORM_CLASS):
 
                     for obj in cls['objects']:
                         attribs = obj[-1]
-                        points = []
-                        geom = obj[0]
-                        starting_point = geom[0][0]
-                        points.append(QgsPointXY(starting_point[1] / settings['from-degs-mul'], starting_point[0] / settings['from-degs-mul']))
-                        for x, y in geom[0][1:]:
-                            x = (starting_point[0] + x) / settings['from-degs-mul']
-                            y = (starting_point[1] + y) / settings['from-degs-mul']
-                            points.append(QgsPointXY(y, x))
+                        outer_geometry = self.create_polygon(obj, settings)
 
-                        qgs_geometry = QgsGeometry.fromPolygonXY([points])
+                        outer_feature = self._attribute_feature(attribs, layer)
 
-                        feature = self._attribute_feature(attribs, layer)
+                        outer_feature.setGeometry(outer_geometry)
 
-                        feature.setGeometry(qgs_geometry)
-
-                        layer.dataProvider().addFeature(feature)
+                        layer.dataProvider().addFeature(outer_feature)
 
                     layers_to_add[layer_order] = layer
 
@@ -191,6 +183,27 @@ class IndyMapsConverterDialog(QtWidgets.QDialog, FORM_CLASS):
 
         self.importProgressBar.setValue(100)
         self.importButton.setEnabled(True)
+
+    def create_polygon(self, obj, settings, inner=False):
+        if inner:
+            idx = 1
+            print(obj[1])
+            if not obj[1]:
+                return QgsGeometry.fromWkt("POLYGON EMPTY")
+        else:
+            idx = 0
+
+        points = []
+        geom = obj[idx]
+        outer_starting_point = geom[idx][0]
+        points.append(QgsPointXY(outer_starting_point[1] / settings['from-degs-mul'],
+                                       outer_starting_point[0] / settings['from-degs-mul']))
+        for x, y in geom[idx][1:]:
+            x = (outer_starting_point[0] + x) / settings['from-degs-mul']
+            y = (outer_starting_point[1] + y) / settings['from-degs-mul']
+            points.append(QgsPointXY(y, x))
+
+        return QgsGeometry.fromPolygonXY([points])
 
     def _attribute_feature(self, attributes, layer):
         for attribute in attributes.items():
