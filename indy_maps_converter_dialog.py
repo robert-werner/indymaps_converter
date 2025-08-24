@@ -26,12 +26,12 @@ import os
 
 from PyQt5.QtCore import QMetaType
 from PyQt5.QtGui import QColor
-from cbor2 import load
+from cbor2 import load, dump
 from cloudinit import settings
 from qgis.PyQt import uic
 from qgis.PyQt import QtWidgets
 
-from qgis.core import QgsProject, QgsLayerTreeGroup, QgsLayerTreeLayer, Qgis, QgsField, QgsCoordinateReferenceSystem, QgsRectangle, QgsReferencedRectangle, QgsPointXY, QgsGeometry, QgsFields, QgsVectorLayer, QgsFeature
+from qgis.core import QgsProject, QgsWkbTypes, QgsLayerTreeGroup, QgsLayerTreeLayer, Qgis, QgsField, QgsCoordinateReferenceSystem, QgsRectangle, QgsReferencedRectangle, QgsPointXY, QgsGeometry, QgsFields, QgsVectorLayer, QgsFeature
 from qgis.utils import iface
 
 # This loads your .ui file so that PyQt can populate your plugin with the elements from Qt Designer
@@ -55,6 +55,7 @@ class IndyMapsConverterDialog(QtWidgets.QDialog, FORM_CLASS):
 
         self.canvas = iface.mapCanvas()
         self.iface = iface
+
 
     def import_imx(self):
         self.importButton.setEnabled(False)
@@ -215,6 +216,15 @@ class IndyMapsConverterDialog(QtWidgets.QDialog, FORM_CLASS):
         feature.setAttributes(attr_list)
         return feature
 
+    def _shape_detector(self, vector_layer):
+        geom_type = vector_layer.geometryType()
+        if geom_type == QgsWkbTypes.PointGeometry:
+            return 1
+        elif geom_type == QgsWkbTypes.LineGeometry:
+            return 2
+        elif geom_type == QgsWkbTypes.PolygonGeometry:
+            return 3
+
     def get_vector_layers_in_order(self, node):
         layers = []
         for child in node.children():
@@ -233,11 +243,37 @@ class IndyMapsConverterDialog(QtWidgets.QDialog, FORM_CLASS):
         obj['settings']['compression-policy'] = 1
         obj['settings']['min-mip'] = 0.0
         obj['settings']['max-mip'] = 50.0
+        obj['classes'] = []
         self.exportButton.setEnabled(False)
         # Access the current QGIS project instance
         project = QgsProject.instance()
 
         vector_layers = self.get_vector_layers_in_order(project.layerTreeRoot())
+
+        for idx, vector_layer in enumerate(vector_layers):
+            symbol = vector_layer.renderer().symbol()
+            shape = self._shape_detector(vector_layer)
+            width = 0
+            line_color = 0
+            fill_color = 0
+            text_color = 0
+            image = ''
+            attributes = {}
+            obj['classes'].append(
+                {
+                    'id': vector_layer.name(),
+                    'objects': [],
+                    'shape': shape,
+                    'layer': idx,
+                    'width': width,
+                    'line-color': line_color,
+                    'fill-color': fill_color,
+                    'text-color': text_color,
+                    'image': image,
+                    'attributes': attributes,
+                }
+            )
+
 
         preset_extent = project.viewSettings().presetFullExtent()
 
@@ -247,17 +283,17 @@ class IndyMapsConverterDialog(QtWidgets.QDialog, FORM_CLASS):
             xmax = preset_extent.xMaximum()
             ymax = preset_extent.yMaximum()
 
-            # Optional: Print pairs to verify
-            print(f"Bottom-left (xmin, ymin): ({ymin}, {xmin})")
-            print(f"Top-right (xmax, ymax): ({ymax}, {xmax})")
 
             obj['borders'] = [
-                [ymin * obj['settings']['from-degs-mul'], xmin * obj['settings']['from-degs-mul']],
+                [ymax * obj['settings']['from-degs-mul'], xmax * obj['settings']['from-degs-mul']],
                 [0, 0],
-                [ymax * obj['settings']['from-degs-mul'], xmax * obj['settings']['from-degs-mul']],
-                [ymax * obj['settings']['from-degs-mul'], xmax * obj['settings']['from-degs-mul']],
+                [ymin * obj['settings']['from-degs-mul'], xmin * obj['settings']['from-degs-mul']],
+                [ymin * obj['settings']['from-degs-mul'], xmin * obj['settings']['from-degs-mul']]
             ]
 
         imx_path = self.exportFileQgsWidget.filePath()
+
+        with open(imx_path, 'wb') as fp:
+            dump(obj, fp)
 
         self.exportButton.setEnabled(True)
