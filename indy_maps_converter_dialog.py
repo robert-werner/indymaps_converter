@@ -27,11 +27,11 @@ import os
 from PyQt5.QtCore import QMetaType
 from PyQt5.QtGui import QColor
 from cbor2 import load
+from cloudinit import settings
 from qgis.PyQt import uic
 from qgis.PyQt import QtWidgets
-from qgis._core import QgsPolygon
 
-from qgis.core import QgsProject, Qgis, QgsField, QgsCoordinateReferenceSystem, QgsRectangle, QgsReferencedRectangle, QgsPointXY, QgsGeometry, QgsFields, QgsVectorLayer, QgsFeature
+from qgis.core import QgsProject, QgsLayerTreeGroup, QgsLayerTreeLayer, Qgis, QgsField, QgsCoordinateReferenceSystem, QgsRectangle, QgsReferencedRectangle, QgsPointXY, QgsGeometry, QgsFields, QgsVectorLayer, QgsFeature
 from qgis.utils import iface
 
 # This loads your .ui file so that PyQt can populate your plugin with the elements from Qt Designer
@@ -187,7 +187,6 @@ class IndyMapsConverterDialog(QtWidgets.QDialog, FORM_CLASS):
     def create_polygon(self, obj, settings, inner=False):
         if inner:
             idx = 1
-            print(obj[1])
             if not obj[1]:
                 return QgsGeometry.fromWkt("POLYGON EMPTY")
         else:
@@ -216,5 +215,49 @@ class IndyMapsConverterDialog(QtWidgets.QDialog, FORM_CLASS):
         feature.setAttributes(attr_list)
         return feature
 
+    def get_vector_layers_in_order(self, node):
+        layers = []
+        for child in node.children():
+            if isinstance(child, QgsLayerTreeLayer):
+                layer = child.layer()
+                if isinstance(layer, QgsVectorLayer):
+                    layers.append(layer)
+            elif isinstance(child, QgsLayerTreeGroup):
+                layers.extend(self.get_vector_layers_in_order(child))
+        return layers
+
     def export_imx(self):
-        ...
+        obj = {}
+        obj['settings'] = {}
+        obj['settings']['from-degs-mul'] = 10000000.0
+        obj['settings']['compression-policy'] = 1
+        obj['settings']['min-mip'] = 0.0
+        obj['settings']['max-mip'] = 50.0
+        self.exportButton.setEnabled(False)
+        # Access the current QGIS project instance
+        project = QgsProject.instance()
+
+        vector_layers = self.get_vector_layers_in_order(project.layerTreeRoot())
+
+        preset_extent = project.viewSettings().presetFullExtent()
+
+        if not preset_extent.isNull():
+            xmin = preset_extent.xMinimum()
+            ymin = preset_extent.yMinimum()
+            xmax = preset_extent.xMaximum()
+            ymax = preset_extent.yMaximum()
+
+            # Optional: Print pairs to verify
+            print(f"Bottom-left (xmin, ymin): ({ymin}, {xmin})")
+            print(f"Top-right (xmax, ymax): ({ymax}, {xmax})")
+
+            obj['borders'] = [
+                [ymin * obj['settings']['from-degs-mul'], xmin * obj['settings']['from-degs-mul']],
+                [0, 0],
+                [ymax * obj['settings']['from-degs-mul'], xmax * obj['settings']['from-degs-mul']],
+                [ymax * obj['settings']['from-degs-mul'], xmax * obj['settings']['from-degs-mul']],
+            ]
+
+        imx_path = self.exportFileQgsWidget.filePath()
+
+        self.exportButton.setEnabled(True)
