@@ -305,7 +305,13 @@ class IndyMapsConverterDialog(QtWidgets.QDialog, FORM_CLASS):
                         )
                     objects[0].append([coords, attributes])
             elif shape == 3:
-                ... # Then it is polygon layer
+                objects = [[]]
+                for feature in features:
+                    geometry = feature.geometry()
+                    attributes = feature.attributeMap()
+                    first_point = geometry.asPolygon()[0][0]
+                    coords = [[ (pt.x(), pt.y()) for pt in ring ] for ring in geometry.asPolygon()]
+                    objects[0].append([coords, attributes])
             obj['classes'].append(
                 {
                     'id': vector_layer.name(),
