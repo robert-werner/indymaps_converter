@@ -310,7 +310,12 @@ class IndyMapsConverterDialog(QtWidgets.QDialog, FORM_CLASS):
                     geometry = feature.geometry()
                     attributes = feature.attributeMap()
                     first_point = geometry.asPolygon()[0][0]
-                    coords = [[ (pt.x(), pt.y()) for pt in ring ] for ring in geometry.asPolygon()]
+                    coords = [first_point]
+                    for ring in geometry.asPolygon():
+                        for pt in ring:
+                            coords.append([
+                                self.substract_from_first_point(first_point, pt.x(), pt.y())
+                            ])
                     objects[0].append([coords, attributes])
             obj['classes'].append(
                 {
