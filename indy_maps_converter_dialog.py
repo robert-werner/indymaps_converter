@@ -53,6 +53,7 @@ class IndyMapsConverterDialog(QtWidgets.QDialog, FORM_CLASS):
 
         self.importButton.clicked.connect(self.import_imx)
         self.exportButton.clicked.connect(self.export_imx)
+        self.from_degs_mul = 10000000.0
 
         self.canvas = iface.mapCanvas()
         self.iface = iface
@@ -252,6 +253,12 @@ class IndyMapsConverterDialog(QtWidgets.QDialog, FORM_CLASS):
                 layers.extend(self.get_vector_layers_in_order(child))
         return layers
 
+    def convert_to_ims_coord_format(self, x, y):
+        return [y * self.from_degs_mul, x * self.from_degs_mul]
+
+    def substract_from_first_point(self, first_point, x, y):
+        return [(first_point.y() * self.from_degs_mul) - y, (first_point.y() * self.from_degs_mul) - x]
+
     def export_imx(self):
         obj = {}
         obj['settings'] = {}
@@ -283,11 +290,20 @@ class IndyMapsConverterDialog(QtWidgets.QDialog, FORM_CLASS):
                     geometry = feature.geometry()
                     attributes = feature.attributeMap()
                     pt = geometry.asPoint()
-                    coord = [pt.y() * obj['settings']['from-degs-mul'], pt.x() * obj['settings']['from-degs-mul']]
-                    objects[0].append([coord, attributes])  # <--- append as a pair
-
+                    coord = self.convert_to_ims_coord_format(pt.x(), pt.y())
+                    objects[0].append([coord, attributes])
             elif shape == 2:
-                ... # Then it is line layer
+                objects = [[]]
+                for feature in features:
+                    geometry = feature.geometry()
+                    attributes = feature.attributeMap()
+                    first_point = geometry.asPolyline()[0]
+                    coords = [self.convert_to_ims_coord_format(first_point.x(), first_point.y())]
+                    for pt in geometry.asPolyline()[1:]:
+                        coords.append(
+                            self.substract_from_first_point(first_point, pt.x(), pt.y())
+                        )
+                    objects[0].append([coords, attributes])
             elif shape == 3:
                 ... # Then it is polygon layer
             obj['classes'].append(
