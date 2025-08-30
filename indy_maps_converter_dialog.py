@@ -23,6 +23,7 @@
 """
 
 import os
+from datetime import datetime
 
 from PyQt5.QtCore import QMetaType
 from PyQt5.QtGui import QColor
@@ -55,6 +56,21 @@ class IndyMapsConverterDialog(QtWidgets.QDialog, FORM_CLASS):
 
         self.canvas = iface.mapCanvas()
         self.iface = iface
+
+    def custom_encoder(self, encoder, value):
+        """Custom encoder for unsupported types"""
+        if isinstance(value, set):
+            # Convert set to list
+            encoder.encode(list(value))
+        elif isinstance(value, datetime):
+            # Convert datetime to ISO string
+            encoder.encode(value.isoformat())
+        elif hasattr(value, '__dict__'):
+            # For custom objects, serialize their __dict__
+            encoder.encode(value.__dict__)
+        else:
+            # Fallback: convert to string representation
+            encoder.encode(str(value))
 
 
     def import_imx(self):
@@ -253,16 +269,31 @@ class IndyMapsConverterDialog(QtWidgets.QDialog, FORM_CLASS):
         for idx, vector_layer in enumerate(vector_layers):
             symbol = vector_layer.renderer().symbol()
             shape = self._shape_detector(vector_layer)
+            features = vector_layer.getFeatures()
+
             width = 0
             line_color = 0
             fill_color = 0
             text_color = 0
             image = ''
-            attributes = {}
+            objects = []
+            if shape == 1:
+                objects = [[]]
+                for feature in features:
+                    geometry = feature.geometry()
+                    attributes = feature.attributeMap()
+                    pt = geometry.asPoint()
+                    coord = [pt.y() * obj['settings']['from-degs-mul'], pt.x() * obj['settings']['from-degs-mul']]
+                    objects[0].append([coord, attributes])  # <--- append as a pair
+
+            elif shape == 2:
+                ... # Then it is line layer
+            elif shape == 3:
+                ... # Then it is polygon layer
             obj['classes'].append(
                 {
                     'id': vector_layer.name(),
-                    'objects': [],
+                    'objects': objects,
                     'shape': shape,
                     'layer': idx,
                     'width': width,
@@ -270,7 +301,7 @@ class IndyMapsConverterDialog(QtWidgets.QDialog, FORM_CLASS):
                     'fill-color': fill_color,
                     'text-color': text_color,
                     'image': image,
-                    'attributes': attributes,
+                    'attributes': {},
                 }
             )
 
@@ -294,6 +325,6 @@ class IndyMapsConverterDialog(QtWidgets.QDialog, FORM_CLASS):
         imx_path = self.exportFileQgsWidget.filePath()
 
         with open(imx_path, 'wb') as fp:
-            dump(obj, fp)
+            dump(obj, fp, default=self.custom_encoder)
 
         self.exportButton.setEnabled(True)
