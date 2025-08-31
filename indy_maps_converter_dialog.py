@@ -257,7 +257,7 @@ class IndyMapsConverterDialog(QtWidgets.QDialog, FORM_CLASS):
         return [y * self.from_degs_mul, x * self.from_degs_mul]
 
     def substract_from_first_point(self, first_point, x, y):
-        return [(first_point.y() * self.from_degs_mul) - y, (first_point.y() * self.from_degs_mul) - x]
+        return [(first_point.y() - y) * self.from_degs_mul, (first_point.x() - x) * self.from_degs_mul]
 
     def export_imx(self):
         obj = {}
@@ -310,13 +310,13 @@ class IndyMapsConverterDialog(QtWidgets.QDialog, FORM_CLASS):
                     geometry = feature.geometry()
                     attributes = feature.attributeMap()
                     first_point = geometry.asPolygon()[0][0]
-                    coords = [first_point]
+                    coords = [self.convert_to_ims_coord_format(first_point.x(), first_point.y())]
                     for ring in geometry.asPolygon():
                         for pt in ring:
                             coords.append([
                                 self.substract_from_first_point(first_point, pt.x(), pt.y())
                             ])
-                    objects[0].append([coords, attributes])
+                        objects[0].append([coords, attributes])
             obj['classes'].append(
                 {
                     'id': vector_layer.name(),
