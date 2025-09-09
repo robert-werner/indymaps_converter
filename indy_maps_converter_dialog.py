@@ -259,6 +259,15 @@ class IndyMapsConverterDialog(QtWidgets.QDialog, FORM_CLASS):
     def substract_from_first_point(self, first_point, x, y):
         return [(first_point.y() - y) * self.from_degs_mul, (first_point.x() - x) * self.from_degs_mul]
 
+    def color_converter(self, color):
+        hex_clean = color.lstrip('#')
+        argb_int = int(hex_clean, 16)
+
+        # If hex was #RRGGBB (6 digits, no alpha), add full opacity (alpha=255)
+        if len(hex_clean) == 6:
+            argb_int = (255 << 24) | argb_int
+        return argb_int
+
     def export_imx(self):
         obj = {}
         obj['settings'] = {}
@@ -274,18 +283,21 @@ class IndyMapsConverterDialog(QtWidgets.QDialog, FORM_CLASS):
         vector_layers = self.get_vector_layers_in_order(project.layerTreeRoot())
 
         for idx, vector_layer in enumerate(vector_layers):
-            symbol = vector_layer.renderer().symbol()
+            symbol = vector_layer.renderer().symbol().symbolLayer(0)
             shape = self._shape_detector(vector_layer)
             features = vector_layer.getFeatures()
 
             width = 0
-            line_color = 0
-            fill_color = 0
-            text_color = 0
+            line_color = self.color_converter(symbol.color().name())
+            fill_color = self.color_converter(symbol.color().name())
+            text_color = self.color_converter(symbol.color().name())
+
+
             image = ''
             objects = []
             if shape == 1:
                 objects = [[]]
+                width = symbol.size()
                 for feature in features:
                     geometry = feature.geometry()
                     attributes = feature.attributeMap()
@@ -294,6 +306,7 @@ class IndyMapsConverterDialog(QtWidgets.QDialog, FORM_CLASS):
                     objects[0].append([coord, attributes])
             elif shape == 2:
                 objects = [[]]
+                width = symbol.width()
                 for feature in features:
                     geometry = feature.geometry()
                     attributes = feature.attributeMap()
@@ -306,6 +319,9 @@ class IndyMapsConverterDialog(QtWidgets.QDialog, FORM_CLASS):
                     objects[0].append([coords, attributes])
             elif shape == 3:
                 objects = [[]]
+                width = symbol.strokeWidth()
+                line_color = self.color_converter(symbol.color().name())
+                fill_color = self.color_converter(symbol.strokeColor().name())
                 for feature in features:
                     geometry = feature.geometry()
                     attributes = feature.attributeMap()
