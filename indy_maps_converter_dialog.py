@@ -28,12 +28,21 @@ from datetime import datetime
 from PyQt5.QtCore import QMetaType
 from PyQt5.QtGui import QColor
 from cbor2 import load, dump
-from cloudinit import settings
 from qgis.PyQt import uic
 from qgis.PyQt import QtWidgets
 
-from qgis.core import QgsProject, QgsWkbTypes, QgsLayerTreeGroup, QgsLayerTreeLayer, Qgis, QgsField, QgsCoordinateReferenceSystem, QgsRectangle, QgsReferencedRectangle, QgsPointXY, QgsGeometry, QgsFields, QgsVectorLayer, QgsFeature
+from qgis.core import (
+    QgsProject, QgsWkbTypes, QgsLayerTreeGroup, QgsLayerTreeLayer,
+    Qgis, QgsField, QgsCoordinateReferenceSystem, QgsRectangle,
+    QgsReferencedRectangle, QgsPointXY, QgsGeometry, QgsVectorLayer,
+    QgsFeature
+)
 from qgis.utils import iface
+
+# Константы для типов геометрии
+POINT_TYPE = 1
+LINE_TYPE = 2
+POLYGON_TYPE = 3
 
 # This loads your .ui file so that PyQt can populate your plugin with the elements from Qt Designer
 FORM_CLASS, _ = uic.loadUiType(os.path.join(
@@ -43,12 +52,7 @@ FORM_CLASS, _ = uic.loadUiType(os.path.join(
 class IndyMapsConverterDialog(QtWidgets.QDialog, FORM_CLASS):
     def __init__(self, parent=None):
         """Constructor."""
-        super(IndyMapsConverterDialog, self).__init__(parent)
-        # Set up the user interface from Designer through FORM_CLASS.
-        # After self.setupUi() you can access any designer object by doing
-        # self.<objectname>, and you can use autoconnect slots - see
-        # http://qt-project.org/doc/qt-4.8/designer-using-a-ui-file.html
-        # #widgets-and-dialogs-with-auto-connect
+        super().__init__(parent)
         self.setupUi(self)
 
         self.importButton.clicked.connect(self.import_imx)
@@ -61,160 +65,141 @@ class IndyMapsConverterDialog(QtWidgets.QDialog, FORM_CLASS):
     def custom_encoder(self, encoder, value):
         """Custom encoder for unsupported types"""
         if isinstance(value, set):
-            # Convert set to list
             encoder.encode(list(value))
         elif isinstance(value, datetime):
-            # Convert datetime to ISO string
             encoder.encode(value.isoformat())
         elif hasattr(value, '__dict__'):
-            # For custom objects, serialize their __dict__
             encoder.encode(value.__dict__)
         else:
-            # Fallback: convert to string representation
             encoder.encode(str(value))
 
+    def _decode_rgba(self, color_int):
+        """Декодирование RGBA из целого числа"""
+        return (
+            (color_int >> 16) & 0xff,
+            (color_int >> 8) & 0xff,
+            color_int & 0xff,
+            (color_int >> 24) & 0xff
+        )
 
-    def import_imx(self):
-        self.importButton.setEnabled(False)
-        imx_path = self.inputFileQgsWidget.filePath()
+    def _process_borders(self, obj, crs):
+        """Обработка границ проекта"""
+        border = obj['borders'][0]
+        settings = obj['settings']
 
-        self.importProgressBar.setValue(0)
+        xs = [pt[1] / settings['from-degs-mul'] for pt in border]
+        ys = [pt[0] / settings['from-degs-mul'] for pt in border]
 
-        project = QgsProject.instance()
-        crs = QgsCoordinateReferenceSystem('EPSG:4326')
+        rectangle = QgsRectangle(min(xs), min(ys), max(xs), max(ys))
+        referenced_extent = QgsReferencedRectangle(rectangle, crs)
 
+        QgsProject.instance().viewSettings().setPresetFullExtent(referenced_extent)
+        self.canvas.refresh()
 
-        with open(imx_path, 'rb') as fp:
-            obj = load(fp)
-            border = obj['borders'][0]
-            classes = obj['classes']
-            settings = obj['settings']
+    def _create_layer(self, cls, geometry_type, settings):
+        """Создание векторного слоя с настройками символа"""
+        layer = QgsVectorLayer(
+            f"{geometry_type}?crs=EPSG:4326",
+            cls['id'],
+            "memory"
+        )
 
-            xs = [pt[1] / settings['from-degs-mul'] for pt in border]
-            ys = [pt[0] / settings['from-degs-mul'] for pt in border]
+        symbol = layer.renderer().symbol()
 
-            # Compute min and max for x and y
-            xmin, xmax = min(xs), max(xs)
-            ymin, ymax = min(ys), max(ys)
+        if cls['shape'] == POINT_TYPE:
+            symbol.setSizeUnit(Qgis.RenderUnit.Millimeters)
+            rgba = self._decode_rgba(cls['fill-color'])
+            symbol.setColor(QColor.fromRgb(*rgba))
+            symbol.setSize(cls['width'])
+        elif cls['shape'] == LINE_TYPE:
+            symbol.setWidthUnit(Qgis.RenderUnit.Millimeters)
+            rgba = self._decode_rgba(cls['line-color'])
+            symbol.setColor(QColor.fromRgb(*rgba))
+            symbol.setWidth(cls['width'])
+        elif cls['shape'] == POLYGON_TYPE:
+            fill_rgba = self._decode_rgba(cls['fill-color'])
+            stroke_rgba = self._decode_rgba(cls['line-color'])
+            symbol.setColor(QColor.fromRgb(*fill_rgba))
+            symbol.symbolLayer(0).setStrokeWidth(cls['width'])
+            symbol.symbolLayer(0).setStrokeColor(QColor.fromRgb(*stroke_rgba))
 
-            rectangle = QgsRectangle(xmin, ymin, xmax, ymax)
+        return layer
 
-            referenced_extent = QgsReferencedRectangle(rectangle, crs)
+    def _process_points(self, cls, settings, all_attributes):
+        """Обработка точечных объектов"""
+        features = []
+        for obj_data in cls['objects']:
+            outer_geom = obj_data[0][0][0]
+            attribs = obj_data[-1]
 
-            project.viewSettings().setPresetFullExtent(referenced_extent)
+            all_attributes.update(attribs.keys())
 
-            self.canvas.refresh()
+            qgs_point = QgsPointXY(
+                outer_geom[1] / settings['from-degs-mul'],
+                outer_geom[0] / settings['from-degs-mul']
+            )
 
-            layers_to_add = {}
+            feature = QgsFeature()
+            feature.setGeometry(QgsGeometry.fromPointXY(qgs_point))
+            feature.setAttributes(list(attribs.values()))
+            features.append(feature)
 
-            for cls in classes:
-                self.importProgressLabel.setText(f"Preprocessing layer: {cls['id']}")
-                if cls['shape'] == 1: # Then it is point
-                    layer_name = cls['id']
-                    layer_order = cls['layer']
-                    layer = QgsVectorLayer("Point?crs=EPSG:4326",
-                                           layer_name,
-                                           "memory")
-                    symbol = layer.renderer().symbol()
-                    symbol.setSizeUnit(Qgis.RenderUnit.Millimeters)  # switch to millimeters
-                    rgba_fill_color = (cls['fill-color'] >> 16) & 0xff, (cls['fill-color'] >> 8) & 0xff, (cls['fill-color']) & 0xff, (cls['fill-color'] >> 24) & 0xff
-                    symbol.setColor(QColor.fromRgb(*rgba_fill_color))
-                    symbol.setSize(cls['width'])
-                    for obj in cls['objects']:
-                        outer_geom = obj[0][0][0]
-                        attribs = obj[-1] # TODO: fix when correct imx will be sent
+        return features
 
+    def _process_lines(self, cls, settings, all_attributes):
+        """Обработка линейных объектов"""
+        features = []
+        for obj_data in cls['objects']:
+            attribs = obj_data[-1]
+            all_attributes.update(attribs.keys())
 
-                        qgs_point = QgsPointXY(outer_geom[1] / settings['from-degs-mul'],
-                                               outer_geom[0] /settings['from-degs-mul'])
-                        outer_qgs_geometry = QgsGeometry.fromPointXY(qgs_point)
+            outer_geom = obj_data[0]
+            outer_starting_point = outer_geom[0][0]
+            outer_geometry = []
 
-                        outer_feature = self._attribute_feature(attribs, layer)
+            for x, y in outer_geom[0][1:]:
+                x = (outer_starting_point[0] + x) / settings['from-degs-mul']
+                y = (outer_starting_point[1] + y) / settings['from-degs-mul']
+                outer_geometry.append(QgsPointXY(y, x))
 
-                        outer_feature.setGeometry(outer_qgs_geometry)
+            feature = QgsFeature()
+            feature.setGeometry(QgsGeometry.fromPolylineXY(outer_geometry))
+            feature.setAttributes(list(attribs.values()))
+            features.append(feature)
 
-                        layer.dataProvider().addFeature(outer_feature)
+        return features
 
-                    layers_to_add[layer_order] = layer
-                if cls['shape'] == 2: # Then it is line
-                    layer_name = cls['id']
-                    layer_order = cls['layer']
-                    layer = QgsVectorLayer("LineString?crs=EPSG:4326",
-                                           layer_name,
-                                           "memory")
-                    symbol = layer.renderer().symbol()
-                    symbol.setWidthUnit(Qgis.RenderUnit.Millimeters)  # switch to millimeters
-                    rgba_fill_color = (cls['line-color'] >> 16) & 0xff, (cls['line-color'] >> 8) & 0xff, (cls['line-color']) & 0xff, (cls['line-color'] >> 24) & 0xff
-                    symbol.setColor(QColor.fromRgb(*rgba_fill_color))
-                    symbol.setWidth(cls['width'])
+    def _process_polygons(self, cls, settings, all_attributes):
+        """Обработка полигональных объектов"""
+        features = []
+        for obj_data in cls['objects']:
+            attribs = obj_data[-1]
+            all_attributes.update(attribs.keys())
 
-                    for obj in cls['objects']:
-                        attribs = obj[-1]
-                        outer_geometry = []
-                        outer_geom = obj[0]
-                        outer_starting_point = outer_geom[0][0]
-                        for x, y in outer_geom[0][1:]:
-                            x = (outer_starting_point[0] + x) / settings['from-degs-mul']
-                            y = (outer_starting_point[1] + y) / settings['from-degs-mul']
-                            outer_geometry.append(QgsPointXY(y, x))
+            outer_geometry = self._create_polygon(obj_data, settings)
+            feature = QgsFeature()
+            feature.setGeometry(outer_geometry)
+            feature.setAttributes(list(attribs.values()))
+            features.append(feature)
 
-                        outer_qgs_geometry = QgsGeometry.fromPolylineXY(outer_geometry)
+        return features
 
-                        outer_feature = self._attribute_feature(attribs, layer)
+    def _create_polygon(self, obj, settings, inner=False):
+        """Создание полигона из данных объекта"""
+        idx = 1 if inner else 0
 
-                        outer_feature.setGeometry(outer_qgs_geometry)
-
-                        layer.dataProvider().addFeature(outer_feature)
-
-                    layers_to_add[layer_order] = layer
-                if cls['shape'] == 3: # Then it is multipolygon
-                    layer_name = cls['id']
-                    layer_order = cls['layer']
-                    layer = QgsVectorLayer("Polygon?crs=EPSG:4326",
-                                           layer_name,
-                                           "memory")
-                    symbol = layer.renderer().symbol()
-                    rgba_fill_color = (cls['fill-color'] >> 16) & 0xff, (cls['fill-color'] >> 8) & 0xff, (cls['fill-color']) & 0xff, (cls['fill-color'] >> 24) & 0xff
-                    rgba_stroke_color = (cls['line-color'] >> 16) & 0xff, (cls['line-color'] >> 8) & 0xff, (cls['line-color']) & 0xff, (cls['line-color'] >> 24) & 0xff
-                    symbol.setColor(QColor.fromRgb(*rgba_fill_color))  # Fill color
-                    symbol.symbolLayer(0).setStrokeWidth(cls['width'])  # in millimeters
-                    symbol.symbolLayer(0).setStrokeColor(QColor.fromRgb(*rgba_stroke_color))
-
-                    for obj in cls['objects']:
-                        attribs = obj[-1]
-                        outer_geometry = self.create_polygon(obj, settings)
-
-                        outer_feature = self._attribute_feature(attribs, layer)
-
-                        outer_feature.setGeometry(outer_geometry)
-
-                        layer.dataProvider().addFeature(outer_feature)
-
-                    layers_to_add[layer_order] = layer
-
-        sorted_layers = dict(sorted(layers_to_add.items()))
-
-        for layer in sorted_layers.values():
-            self.importProgressBar.setValue(self.importProgressBar.value() + (100 // len(sorted_layers)))
-            QgsProject.instance().addMapLayer(layer)
-            self.canvas.refresh()
-
-        self.importProgressBar.setValue(100)
-        self.importButton.setEnabled(True)
-
-    def create_polygon(self, obj, settings, inner=False):
-        if inner:
-            idx = 1
-            if not obj[1]:
-                return QgsGeometry.fromWkt("POLYGON EMPTY")
-        else:
-            idx = 0
+        if inner and not obj[1]:
+            return QgsGeometry.fromWkt("POLYGON EMPTY")
 
         points = []
         geom = obj[idx]
         outer_starting_point = geom[idx][0]
-        points.append(QgsPointXY(outer_starting_point[1] / settings['from-degs-mul'],
-                                       outer_starting_point[0] / settings['from-degs-mul']))
+
+        points.append(QgsPointXY(
+            outer_starting_point[1] / settings['from-degs-mul'],
+            outer_starting_point[0] / settings['from-degs-mul']
+        ))
+
         for x, y in geom[idx][1:]:
             x = (outer_starting_point[0] + x) / settings['from-degs-mul']
             y = (outer_starting_point[1] + y) / settings['from-degs-mul']
@@ -222,27 +207,94 @@ class IndyMapsConverterDialog(QtWidgets.QDialog, FORM_CLASS):
 
         return QgsGeometry.fromPolygonXY([points])
 
-    def _attribute_feature(self, attributes, layer):
-        for attribute in attributes.items():
-            layer.dataProvider().addAttributes([
-                QgsField(attribute[0], QMetaType.Type.QString)
-            ])
-        layer.updateFields()
-        feature = QgsFeature(layer.fields())
-        attr_list = [attributes.get(field.name()) for field in layer.fields()]
-        feature.setAttributes(attr_list)
-        return feature
+    def import_imx(self):
+        """Импорт IMX файла"""
+        try:
+            self.importButton.setEnabled(False)
+            imx_path = self.inputFileQgsWidget.filePath()
+
+            if not imx_path:
+                raise ValueError("Не выбран файл для импорта")
+
+            self.importProgressBar.setValue(0)
+
+            with open(imx_path, 'rb') as fp:
+                obj = load(fp)
+
+            crs = QgsCoordinateReferenceSystem('EPSG:4326')
+            self._process_borders(obj, crs)
+
+            layers_to_add = {}
+            total_classes = len(obj['classes'])
+
+            for i, cls in enumerate(obj['classes']):
+                self.importProgressLabel.setText(f"Обработка слоя: {cls['id']}")
+
+                # Определяем тип геометрии
+                if cls['shape'] == POINT_TYPE:
+                    geometry_type = "Point"
+                elif cls['shape'] == LINE_TYPE:
+                    geometry_type = "LineString"
+                elif cls['shape'] == POLYGON_TYPE:
+                    geometry_type = "Polygon"
+                else:
+                    continue
+
+                # Создаем слой
+                layer = self._create_layer(cls, geometry_type, obj['settings'])
+                all_attributes = set()
+
+                # Обрабатываем объекты в зависимости от типа
+                if cls['shape'] == POINT_TYPE:
+                    features = self._process_points(cls, obj['settings'], all_attributes)
+                elif cls['shape'] == LINE_TYPE:
+                    features = self._process_lines(cls, obj['settings'], all_attributes)
+                elif cls['shape'] == POLYGON_TYPE:
+                    features = self._process_polygons(cls, obj['settings'], all_attributes)
+
+                # Добавляем поля атрибутов
+                if all_attributes:
+                    layer.dataProvider().addAttributes([
+                        QgsField(attr, QMetaType.Type.QString)
+                        for attr in all_attributes
+                    ])
+                    layer.updateFields()
+                    # Обновляем атрибуты для всех фич
+                    for feature in features:
+                        feature.setFields(layer.fields())
+
+                # Добавляем объекты в слой
+                if features:
+                    layer.dataProvider().addFeatures(features)
+
+                layers_to_add[cls['layer']] = layer
+                self.importProgressBar.setValue(int((i + 1) / total_classes * 100))
+
+            # Добавляем слои в проект в правильном порядке
+            for layer_order in sorted(layers_to_add.keys()):
+                QgsProject.instance().addMapLayer(layers_to_add[layer_order])
+
+            self.canvas.refresh()
+            self.importProgressBar.setValue(100)
+
+        except Exception as e:
+            self.iface.messageBar().pushCritical("Ошибка", f"Ошибка импорта: {str(e)}")
+        finally:
+            self.importButton.setEnabled(True)
 
     def _shape_detector(self, vector_layer):
+        """Определение типа геометрии слоя"""
         geom_type = vector_layer.geometryType()
         if geom_type == QgsWkbTypes.PointGeometry:
-            return 1
+            return POINT_TYPE
         elif geom_type == QgsWkbTypes.LineGeometry:
-            return 2
+            return LINE_TYPE
         elif geom_type == QgsWkbTypes.PolygonGeometry:
-            return 3
+            return POLYGON_TYPE
+        return None
 
     def get_vector_layers_in_order(self, node):
+        """Получение векторных слоев в порядке их отображения в дереве слоев"""
         layers = []
         for child in node.children():
             if isinstance(child, QgsLayerTreeLayer):
@@ -254,120 +306,141 @@ class IndyMapsConverterDialog(QtWidgets.QDialog, FORM_CLASS):
         return layers
 
     def convert_to_ims_coord_format(self, x, y):
-        return [y * self.from_degs_mul, x * self.from_degs_mul]
+        """Конвертация координат в формат IMS"""
+        return [int(y * self.from_degs_mul), int(x * self.from_degs_mul)]
 
     def substract_from_first_point(self, first_point, x, y):
-        return [(first_point.y() - y) * self.from_degs_mul, (first_point.x() - x) * self.from_degs_mul]
+        """Вычитание координат из первой точки"""
+        return [
+            int((first_point.y() - y) * self.from_degs_mul),
+            int((first_point.x() - x) * self.from_degs_mul)
+        ]
 
     def color_converter(self, color):
+        """Конвертация цвета в целочисленный формат"""
         hex_clean = color.lstrip('#')
         argb_int = int(hex_clean, 16)
 
-        # If hex was #RRGGBB (6 digits, no alpha), add full opacity (alpha=255)
+        # Если hex был #RRGGBB (6 digits, no alpha), add full opacity (alpha=255)
         if len(hex_clean) == 6:
             argb_int = (255 << 24) | argb_int
         return argb_int
 
     def export_imx(self):
-        obj = {}
-        obj['settings'] = {}
-        obj['settings']['from-degs-mul'] = 10000000.0
-        obj['settings']['compression-policy'] = 1
-        obj['settings']['min-mip'] = 0.0
-        obj['settings']['max-mip'] = 50.0
-        obj['classes'] = []
-        self.exportButton.setEnabled(False)
-        # Access the current QGIS project instance
-        project = QgsProject.instance()
+        """Экспорт проекта в IMX формат"""
+        try:
+            self.exportButton.setEnabled(False)
+            project = QgsProject.instance()
 
-        vector_layers = self.get_vector_layers_in_order(project.layerTreeRoot())
+            # Получаем векторные слои
+            vector_layers = self.get_vector_layers_in_order(project.layerTreeRoot())
+            if not vector_layers:
+                raise ValueError("Нет векторных слоев для экспорта")
 
-        for idx, vector_layer in enumerate(vector_layers):
-            symbol = vector_layer.renderer().symbol().symbolLayer(0)
-            shape = self._shape_detector(vector_layer)
-            features = vector_layer.getFeatures()
+            obj = {
+                'settings': {
+                    'from-degs-mul': self.from_degs_mul,
+                    'compression-policy': 1,
+                    'min-mip': 0.0,
+                    'max-mip': 50.0
+                },
+                'classes': []
+            }
 
-            width = 0
-            line_color = self.color_converter(symbol.color().name())
-            fill_color = self.color_converter(symbol.color().name())
-            text_color = self.color_converter(symbol.color().name())
+            # Обрабатываем каждый слой
+            for idx, layer in enumerate(vector_layers):
+                shape = self._shape_detector(layer)
+                if not shape:
+                    continue
 
+                symbol = layer.renderer().symbol().symbolLayer(0)
+                features = list(layer.getFeatures())
 
-            image = ''
-            objects = []
-            if shape == 1:
-                objects = [[]]
-                width = symbol.size()
-                for feature in features:
-                    geometry = feature.geometry()
-                    attributes = feature.attributeMap()
-                    pt = geometry.asPoint()
-                    coord = self.convert_to_ims_coord_format(pt.x(), pt.y())
-                    objects[0].append([coord, attributes])
-            elif shape == 2:
-                objects = [[]]
-                width = symbol.width()
-                for feature in features:
-                    geometry = feature.geometry()
-                    attributes = feature.attributeMap()
-                    first_point = geometry.asPolyline()[0]
-                    coords = [self.convert_to_ims_coord_format(first_point.x(), first_point.y())]
-                    for pt in geometry.asPolyline()[1:]:
-                        coords.append(
-                            self.substract_from_first_point(first_point, pt.x(), pt.y())
-                        )
-                    objects[0].append([coords, attributes])
-            elif shape == 3:
-                objects = [[]]
-                width = symbol.strokeWidth()
+                # Получаем общие настройки символа
+                if shape == POINT_TYPE:
+                    width = symbol.size()
+                elif shape == LINE_TYPE:
+                    width = symbol.width()
+                elif shape == POLYGON_TYPE:
+                    width = symbol.strokeWidth()
+
                 line_color = self.color_converter(symbol.color().name())
-                fill_color = self.color_converter(symbol.strokeColor().name())
+                fill_color = self.color_converter(symbol.color().name())
+
+                # Обрабатываем объекты
+                objects = []
                 for feature in features:
                     geometry = feature.geometry()
-                    attributes = feature.attributeMap()
-                    first_point = geometry.asPolygon()[0][0]
-                    coords = [self.convert_to_ims_coord_format(first_point.x(), first_point.y())]
-                    for ring in geometry.asPolygon():
-                        for pt in ring:
-                            coords.append([
-                                self.substract_from_first_point(first_point, pt.x(), pt.y())
-                            ])
-                        objects[0].append([coords, attributes])
-            obj['classes'].append(
-                {
-                    'id': vector_layer.name(),
+                    attributes = {field.name(): value for field, value in zip(layer.fields(), feature.attributes())}
+
+                    if shape == POINT_TYPE:
+                        # Обработка точек
+                        pt = geometry.asPoint()
+                        coord = self.convert_to_ims_coord_format(pt.x(), pt.y())
+                        objects.append([coord, attributes])
+                    elif shape == LINE_TYPE:
+                        # Обработка линий
+                        line = geometry.asPolyline()
+                        if not line:
+                            continue
+
+                        first_point = line[0]
+                        coords = [self.convert_to_ims_coord_format(first_point.x(), first_point.y())]
+                        for pt in line[1:]:
+                            coords.append(self.substract_from_first_point(first_point, pt.x(), pt.y()))
+                        objects.append([coords, attributes])
+                    elif shape == POLYGON_TYPE:
+                        # Обработка полигонов
+                        polygon = geometry.asPolygon()
+                        if not polygon or not polygon[0]:
+                            continue
+
+                        first_point = polygon[0][0]
+                        coords = [self.convert_to_ims_coord_format(first_point.x(), first_point.y())]
+                        for ring in polygon:
+                            for pt in ring:
+                                coords.append(self.substract_from_first_point(first_point, pt.x(), pt.y()))
+                        objects.append([coords, attributes])
+
+                obj['classes'].append({
+                    'id': layer.name(),
                     'objects': objects,
                     'shape': shape,
                     'layer': idx,
                     'width': width,
                     'line-color': line_color,
                     'fill-color': fill_color,
-                    'text-color': text_color,
-                    'image': image,
+                    'text-color': fill_color,
+                    'image': '',
                     'attributes': {},
-                }
-            )
+                })
 
+            # Обрабатываем границы проекта
+            preset_extent = project.viewSettings().presetFullExtent()
+            if not preset_extent.isNull():
+                xmin = preset_extent.xMinimum()
+                ymin = preset_extent.yMinimum()
+                xmax = preset_extent.xMaximum()
+                ymax = preset_extent.yMaximum()
 
-        preset_extent = project.viewSettings().presetFullExtent()
+                obj['borders'] = [
+                    [int(ymax * self.from_degs_mul), int(xmax * self.from_degs_mul)],
+                    [0, 0],
+                    [int(ymin * self.from_degs_mul), int(xmin * self.from_degs_mul)],
+                    [int(ymin * self.from_degs_mul), int(xmin * self.from_degs_mul)]
+                ]
 
-        if not preset_extent.isNull():
-            xmin = preset_extent.xMinimum()
-            ymin = preset_extent.yMinimum()
-            xmax = preset_extent.xMaximum()
-            ymax = preset_extent.yMaximum()
+            # Сохраняем файл
+            imx_path = self.exportFileQgsWidget.filePath()
+            if not imx_path:
+                raise ValueError("Не указан путь для сохранения файла")
 
+            with open(imx_path, 'wb') as fp:
+                dump(obj, fp, default=self.custom_encoder)
 
-            obj['borders'] = [
-                [ymax * obj['settings']['from-degs-mul'], xmax * obj['settings']['from-degs-mul']],
-                [0, 0],
-                [ymin * obj['settings']['from-degs-mul'], xmin * obj['settings']['from-degs-mul']],
-                [ymin * obj['settings']['from-degs-mul'], xmin * obj['settings']['from-degs-mul']]
-            ]
+            self.iface.messageBar().pushSuccess("Успех", "Экспорт завершен успешно")
 
-        imx_path = self.exportFileQgsWidget.filePath()
-
-        with open(imx_path, 'wb') as fp:
-            dump(obj, fp, default=self.custom_encoder)
-
-        self.exportButton.setEnabled(True)
+        except Exception as e:
+            self.iface.messageBar().pushCritical("Ошибка", f"Ошибка экспорта: {str(e)}")
+        finally:
+            self.exportButton.setEnabled(True)
