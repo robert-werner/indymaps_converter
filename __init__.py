@@ -24,6 +24,26 @@
 """
 
 
+def pip_dependencies():
+    import subprocess
+    from configparser import ConfigParser
+    from pathlib import Path
+    from qgis.PyQt.QtCore import QStandardPaths
+
+    metadata_txt = Path(__file__).parent / "metadata.txt"
+    config = ConfigParser(allow_no_value=True)
+    config.read(metadata_txt)
+    metadata = dict(config["general"])
+    deps = metadata.get('pip_dependencies', '')
+    if not deps: return
+    python = QStandardPaths.findExecutable("python")
+    subprocess.run(
+        f"{python} -m pip install --user {deps}",
+        shell=True,
+        check=True,
+    )
+
+
 # noinspection PyPep8Naming
 def classFactory(iface):  # pylint: disable=invalid-name
     """Load IndyMapsConverter class from file IndyMapsConverter.
@@ -32,5 +52,10 @@ def classFactory(iface):  # pylint: disable=invalid-name
     :type iface: QgsInterface
     """
     #
-    from .indy_maps_converter import IndyMapsConverter
+    try:
+        from .indy_maps_converter import IndyMapsConverter
+    except ImportError:
+        pip_dependencies()
+        from .indy_maps_converter import IndyMapsConverter
+
     return IndyMapsConverter(iface)
