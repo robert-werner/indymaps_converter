@@ -37,6 +37,8 @@ deprecated=False
 Category of the plugin: Raster, Vector, Database or Web
 # category=
 
+plugin_dependencies=qpip
+
 # If the plugin can run on QGIS Server.
 server=False
 
