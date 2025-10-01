@@ -177,6 +177,8 @@ class IndyMapsConverterDialog(QtWidgets.QDialog, FORM_CLASS):
             all_attributes.update(attribs.keys())
 
             outer_geometry = self._create_polygon(obj_data, settings)
+            inner_geometry = self._create_polygon(obj_data, settings, inner=True)
+            geometry = outer_geometry.difference(inner_geometry)
             feature = QgsFeature()
             feature.setGeometry(outer_geometry)
             feature.setAttributes(list(attribs.values()))
@@ -188,21 +190,21 @@ class IndyMapsConverterDialog(QtWidgets.QDialog, FORM_CLASS):
         """Создание полигона из данных объекта"""
         idx = 1 if inner else 0
 
-        if inner and not obj[1]:
+        if inner and not obj[idx]:
             return QgsGeometry.fromWkt("POLYGON EMPTY")
 
         points = []
         geom = obj[idx]
-        outer_starting_point = geom[idx][0]
+        starting_point = geom[0][0]
 
         points.append(QgsPointXY(
-            outer_starting_point[1] / settings['from-degs-mul'],
-            outer_starting_point[0] / settings['from-degs-mul']
+            starting_point[1] / settings['from-degs-mul'],
+            starting_point[0] / settings['from-degs-mul']
         ))
 
-        for x, y in geom[idx][1:]:
-            x = (outer_starting_point[0] + x) / settings['from-degs-mul']
-            y = (outer_starting_point[1] + y) / settings['from-degs-mul']
+        for x, y in geom[0][1:]:
+            x = (starting_point[0] + x) / settings['from-degs-mul']
+            y = (starting_point[1] + y) / settings['from-degs-mul']
             points.append(QgsPointXY(y, x))
 
         return QgsGeometry.fromPolygonXY([points])
@@ -278,7 +280,7 @@ class IndyMapsConverterDialog(QtWidgets.QDialog, FORM_CLASS):
             self.importProgressBar.setValue(100)
 
         except Exception as e:
-            self.iface.messageBar().pushCritical("Ошибка", f"Ошибка импорта: {str(e)}")
+            raise e
         finally:
             self.importButton.setEnabled(True)
 
