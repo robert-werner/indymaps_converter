@@ -52,7 +52,6 @@ def classFactory(iface):  # pylint: disable=invalid-name
     :type iface: QgsInterface
     """
     #
-    pip_dependencies()
     from .indy_maps_converter import IndyMapsConverter
 
     return IndyMapsConverter(iface)
