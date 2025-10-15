@@ -30,6 +30,7 @@ from PyQt5.QtGui import QColor
 from cbor2 import load, dump
 from qgis.PyQt import uic
 from qgis.PyQt import QtWidgets
+from qgis._core import QgsRenderContext
 
 from qgis.core import (
     QgsProject, QgsWkbTypes, QgsLayerTreeGroup, QgsLayerTreeLayer,
@@ -210,7 +211,7 @@ class IndyMapsConverterDialog(QtWidgets.QDialog, FORM_CLASS):
         return QgsGeometry.fromPolygonXY([points])
 
     def import_imx(self):
-        """Импорт IMX файла"""
+        """Импорт IMX файла (устойчив к отсутствующим/пустым borders)."""
         try:
             self.importButton.setEnabled(False)
             imx_path = self.inputFileQgsWidget.filePath()
@@ -220,16 +221,81 @@ class IndyMapsConverterDialog(QtWidgets.QDialog, FORM_CLASS):
 
             self.importProgressBar.setValue(0)
 
+            from cbor2 import load
             with open(imx_path, 'rb') as fp:
                 obj = load(fp)
 
+            # CRS проекта для пресета экстента
             crs = QgsCoordinateReferenceSystem('EPSG:4326')
-            self._process_borders(obj, crs)
+
+            # Настройки масштаба координат
+            settings = obj.get('settings', {})
+            mul = settings.get('from-degs-mul', self.from_degs_mul)
+
+            # 1) Экстент проекта:
+            #    - если borders непустой — используем существующую логику
+            #    - иначе вычисляем из classes/objects
+            def set_preset_extent_from_bounds(minx, miny, maxx, maxy):
+                rect = QgsRectangle(minx, miny, maxx, maxy)
+                ref_rect = QgsReferencedRectangle(rect, crs)
+                QgsProject.instance().viewSettings().setPresetFullExtent(ref_rect)
+
+            borders = obj.get('borders') or []
+            if borders:
+                # Старый путь, если границы заданы
+                self._process_borders(obj, crs)
+            else:
+                # Вычислить экстент по объектам IMX
+                minx = float('inf')
+                miny = float('inf')
+                maxx = float('-inf')
+                maxy = float('-inf')
+
+                def update_from_polygon(poly):
+                    nonlocal minx, miny, maxx, maxy
+                    if not poly:
+                        return
+                    # poly: [ [lat_abs, lon_abs], [dlat, dlon], ... ]
+                    lat = poly[0][0]
+                    lon = poly[0][1]
+                    # абсолютная первая точка
+                    x = lon / mul
+                    y = lat / mul
+                    if x < minx: minx = x
+                    if x > maxx: maxx = x
+                    if y < miny: miny = y
+                    if y > maxy: maxy = y
+                    # накапливаем относительные дельты
+                    cur_lat = lat
+                    cur_lon = lon
+                    for dlat, dlon in poly[1:]:
+                        cur_lat += dlat
+                        cur_lon += dlon
+                        x = cur_lon / mul
+                        y = cur_lat / mul
+                        if x < minx: minx = x
+                        if x > maxx: maxx = x
+                        if y < miny: miny = y
+                        if y > maxy: maxy = y
+
+                for cls in obj.get('classes', []):
+                    for obj_data in cls.get('objects', []):
+                        outers = obj_data[0] if len(obj_data) > 0 else []
+                        inners = obj_data[1] if len(obj_data) > 1 else []
+                        for poly in outers:
+                            update_from_polygon(poly)
+                        for poly in inners:
+                            update_from_polygon(poly)
+
+                # Если удалось вычислить экстент — задаём его как preset full extent
+                if minx != float('inf') and miny != float('inf'):
+                    set_preset_extent_from_bounds(minx, miny, maxx, maxy)
+                # Иначе ничего не задаём: QGIS сможет вычислить максимальный экстент по слоям, если preset останется null
 
             layers_to_add = {}
-            total_classes = len(obj['classes'])
+            total_classes = len(obj.get('classes', [])) or 1
 
-            for i, cls in enumerate(obj['classes']):
+            for i, cls in enumerate(obj.get('classes', [])):
                 self.importProgressLabel.setText(f"Обработка слоя: {cls['id']}")
 
                 # Определяем тип геометрии
@@ -333,7 +399,77 @@ class IndyMapsConverterDialog(QtWidgets.QDialog, FORM_CLASS):
         """Конвертирует QColor в ARGB uint (alpha << 24 | red << 16 | green << 8 | blue)."""
         return (c.alpha() << 24) | (c.red() << 16) | (c.green() << 8) | c.blue()
 
+    def _legend_items(self, renderer):
+        """
+        Return a list of (key, label, symbol) for any renderer type.
+        Falls back to a single default item if needed.
+        """
+        if not renderer:
+            return []
+
+        # Try to use legend items when available
+        items = []
+        if hasattr(renderer, "legendSymbolItems"):
+            for it in renderer.legendSymbolItems():
+                # QgsLegendSymbolItem has .key(), .label(), .symbol()
+                items.append((it.key(), it.label(), it.symbol()))
+            if items:
+                return items
+
+        # Fallbacks
+        # 1) single symbol
+        if hasattr(renderer, "symbol") and renderer.symbol():
+            return [("default", "", renderer.symbol())]
+
+        # 2) multiple symbols list
+        try:
+            symbols = renderer.symbols()
+        except TypeError:
+            symbols = renderer.symbols(QgsRenderContext())
+        if symbols:
+            return [(f"default-{i}", "", s) for i, s in enumerate(symbols)]
+
+        return []
+
+    def _extract_style(self, symbol, shape):
+        """
+        Derive width/line/fill colors from a symbol in a renderer-agnostic way.
+        """
+        line_color = self._qcolor_to_argb_int(symbol.color())
+        fill_color = self._qcolor_to_argb_int(symbol.color())
+        width = 0.2
+
+        if symbol.symbolLayerCount() > 0:
+            sl = symbol.symbolLayer(0)
+
+            # Colors
+            if hasattr(sl, "strokeColor"):
+                line_color = self._qcolor_to_argb_int(sl.strokeColor())
+            elif hasattr(sl, "color"):
+                line_color = self._qcolor_to_argb_int(sl.color())
+
+            if hasattr(sl, "fillColor"):
+                fill_color = self._qcolor_to_argb_int(sl.fillColor())
+            elif hasattr(sl, "color"):
+                fill_color = self._qcolor_to_argb_int(sl.color())
+
+            # Width/Size
+            if shape == POINT_TYPE:
+                if hasattr(symbol, "size"):
+                    width = float(symbol.size())
+            elif shape == LINE_TYPE:
+                if hasattr(sl, "width"):
+                    width = float(sl.width())
+            elif shape == POLYGON_TYPE:
+                if hasattr(sl, "strokeWidth"):
+                    width = float(sl.strokeWidth())
+
+        return width, line_color, fill_color
+
     def export_imx(self):
+        # Lazy import для контекста рендера
+        from qgis.core import QgsRenderContext
+
         self.exportButton.setEnabled(False)
         try:
             obj = {
@@ -350,25 +486,21 @@ class IndyMapsConverterDialog(QtWidgets.QDialog, FORM_CLASS):
 
             project = QgsProject.instance()
 
-            # Экспорт границ из presetFullExtent как один полигон
+            # Экспорт границ из presetFullExtent как один полигон (как было)
             preset_extent = project.viewSettings().presetFullExtent()
             if not preset_extent.isNull():
                 xmin = preset_extent.xMinimum()
                 ymin = preset_extent.yMinimum()
                 xmax = preset_extent.xMaximum()
                 ymax = preset_extent.yMaximum()
-                # Полигон: top-left, top-right, bottom-right, bottom-left (замкнутый относительно первой точки)
                 abs_first = [ymax * mul, xmin * mul]  # [lat_mul, lon_mul]
                 polygon = [abs_first]
-                # Delta to top-right
-                polygon.append([0, (xmax - xmin) * mul])
-                # Delta to bottom-right
-                polygon.append([(ymin - ymax) * mul, 0])
-                # Delta to bottom-left
-                polygon.append([0, (xmin - xmax) * mul])
+                polygon.append([0, (xmax - xmin) * mul])  # top-right
+                polygon.append([(ymin - ymax) * mul, 0])  # bottom-right
+                polygon.append([0, (xmin - xmax) * mul])  # bottom-left
                 obj['borders'] = [polygon]
 
-            # Рекурсивный проход по дереву слоев для получения векторных слоев с parent-id
+            # Рекурсивный проход по дереву слоев
             def collect_layers(node, parent_id=""):
                 collected = []
                 for child in node.children():
@@ -383,14 +515,14 @@ class IndyMapsConverterDialog(QtWidgets.QDialog, FORM_CLASS):
 
             vector_layers = collect_layers(project.layerTreeRoot())
 
-            # Маппинг стилей линий/заливок на class-type
+            # Маппинг стилей линий/заливок на class-type (как было)
             def get_style_code(symbol_layer):
                 if hasattr(symbol_layer, 'penStyle'):
                     pen = symbol_layer.penStyle()
                     if pen == 1: return 0  # Solid
                     if pen == 2: return 1  # Dash
-                    if pen == 3: return 2  # DashDot (DotDash)
-                    if pen == 4: return 7  # Dots (Dot)
+                    if pen == 3: return 2  # DashDot
+                    if pen == 4: return 7  # Dots
                 if hasattr(symbol_layer, 'brushStyle'):
                     brush = symbol_layer.brushStyle()
                     if brush == 1: return 0  # Solid
@@ -400,17 +532,16 @@ class IndyMapsConverterDialog(QtWidgets.QDialog, FORM_CLASS):
                     if brush == 10: return 4  # FDiag
                 return 0  # Default Solid
 
+            # Подготовим контекст рендера для вызовов symbolForFeature(...)
+            ctx = QgsRenderContext.fromMapSettings(self.canvas.mapSettings())
+
             for idx, (vl, parent_id) in enumerate(vector_layers):
                 renderer = vl.renderer()
                 if not renderer:
                     continue
-                symbol = renderer.symbol()
-                if not symbol or symbol.symbolLayerCount() == 0:
-                    continue
-                symbol_layer = symbol.symbolLayer(0)
 
                 shape = self._shape_detector(vl)
-                if shape == 0:
+                if not shape:
                     continue
 
                 cls = {
@@ -418,90 +549,118 @@ class IndyMapsConverterDialog(QtWidgets.QDialog, FORM_CLASS):
                     'objects': [],
                     'shape': shape,
                     'parent-id': parent_id,
-                    'style': get_style_code(symbol_layer),
+                    'style': 0,
                     'layer': idx,
-                    'width': 0.2,  # Default, override below
+                    'width': 0.2,
                     'min-mip': 0.0,
                     'max-mip': 0.0,
                     'line-color': 0,
                     'fill-color': 0,
                     'text-color': 0,
-                    'attributes': {},  # Можно добавить метаданные слоя, напр. {'crs': vl.crs().authid()}
+                    'attributes': {},
                 }
 
-                # Min/max mip из scale visibility (приближенно, mip ~ scale / const, но здесь default)
+                # Min/max mip из видимости по масштабу (как было)
                 if vl.hasScaleBasedVisibility():
-                    cls['min-mip'] = vl.minimumScale() / 1000000.0  # Примерная конверсия
-                    cls['max-mip'] = vl.maximumScale() / 1000000.0
+                    cls['min-mip'] = vl.minimumScale() / 1_000_000.0
+                    cls['max-mip'] = vl.maximumScale() / 1_000_000.0
 
-                # Цвета и ширина
-                line_color = self._qcolor_to_argb_int(symbol_layer.strokeColor()) if hasattr(symbol_layer,
-                                                                                             'strokeColor') else self._qcolor_to_argb_int(
-                    symbol.color())
-                fill_color = self._qcolor_to_argb_int(symbol.color())
-                text_color = 0  # TODO: Из лейблов, если нужно
-                cls['line-color'] = line_color
-                cls['fill-color'] = fill_color
-                cls['text-color'] = text_color
+                # Итерируем фичи, получая фактический символ через symbolForFeature(...)
+                # symbolForFeature должен вызываться между startRender(...) и stopRender(...)
+                renderer.startRender(ctx, vl.fields())
+                try:
+                    first_symbol_for_class = None
 
-                if shape == 1:
-                    cls['width'] = float(symbol.size())
-                elif shape == 2:
-                    cls['width'] = float(symbol_layer.width()) if hasattr(symbol_layer, 'width') else 0.5
-                elif shape == 3:
-                    cls['width'] = float(symbol_layer.strokeWidth()) if hasattr(symbol_layer, 'strokeWidth') else 0.2
+                    for feature in vl.getFeatures():
+                        geometry = feature.geometry()
+                        if not geometry or geometry.isEmpty():
+                            continue
 
-                # Объекты (features)
-                for feature in vl.getFeatures():
-                    geometry = feature.geometry()
-                    attrs = {field.name(): feature[field.name()] for field in vl.fields()}
-                    outers = []
-                    inners = []
+                        # Получаем символ для фичи; если рендерер возвращает несколько, берем первый
+                        sym = renderer.symbolForFeature(feature, ctx)
+                        if sym is None:
+                            syms = renderer.symbolsForFeature(feature, ctx)
+                            sym = syms[0] if syms else None
+                        symbol_layer = sym.symbolLayer(0) if sym and sym.symbolLayerCount() > 0 else None
 
-                    if shape == 1:  # Point or MultiPoint
-                        points = geometry.asMultiPoint() if geometry.isMultipart() else [geometry.asPoint()]
-                        outers = [[[p.y() * mul, p.x() * mul]] for p in points]
+                        # Инициализируем стиль класса по первому встретившемуся символу
+                        if sym and first_symbol_for_class is None:
+                            first_symbol_for_class = sym
+                            # Цвета
+                            line_color = self._qcolor_to_argb_int(
+                                symbol_layer.strokeColor()) if symbol_layer and hasattr(symbol_layer,
+                                                                                        'strokeColor') else self._qcolor_to_argb_int(
+                                sym.color())
+                            fill_color = self._qcolor_to_argb_int(sym.color())
+                            cls['line-color'] = line_color
+                            cls['fill-color'] = fill_color
+                            # Толщина/размер
+                            if shape == POINT_TYPE:
+                                cls['width'] = float(sym.size()) if hasattr(sym, 'size') else cls['width']
+                            elif shape == LINE_TYPE:
+                                if symbol_layer and hasattr(symbol_layer, 'width'):
+                                    cls['width'] = float(symbol_layer.width())
+                                elif hasattr(sym, 'width'):
+                                    cls['width'] = float(sym.width())
+                            elif shape == POLYGON_TYPE:
+                                if symbol_layer and hasattr(symbol_layer, 'strokeWidth'):
+                                    cls['width'] = float(symbol_layer.strokeWidth())
+                            # Стиль штриха/заливки
+                            if symbol_layer:
+                                cls['style'] = get_style_code(symbol_layer)
 
-                    elif shape == 2:  # Line or MultiLine
-                        lines = geometry.asMultiPolyline() if geometry.isMultipart() else [geometry.asPolyline()]
-                        for line in lines:
-                            if not line:
-                                continue
-                            first = line[0]
-                            poly = [[first.y() * mul, first.x() * mul]]
-                            for pt in line[1:]:
-                                delta_lat = (pt.y() - first.y()) * mul
-                                delta_lon = (pt.x() - first.x()) * mul
-                                poly.append([delta_lat, delta_lon])
-                            outers.append(poly)
+                        # Атрибуты фичи
+                        attrs = {field.name(): feature[field.name()] for field in vl.fields()}
+                        outers = []
+                        inners = []
 
-                    elif shape == 3:  # Polygon or MultiPolygon
-                        polys = geometry.asMultiPolygon() if geometry.isMultipart() else [geometry.asPolygon()]
-                        for poly in polys:
-                            if not poly:
-                                continue
-                            # Outer
-                            outer_ring = poly[0]
-                            if outer_ring:
-                                first = outer_ring[0]
-                                outer_poly = [[first.y() * mul, first.x() * mul]]
-                                for pt in outer_ring[1:]:
+                        # Геометрия -> формат IMX
+                        if shape == POINT_TYPE:
+                            pts = geometry.asMultiPoint() if geometry.isMultipart() else [geometry.asPoint()]
+                            outers = [[[p.y() * mul, p.x() * mul]] for p in pts]
+
+                        elif shape == LINE_TYPE:
+                            lines = geometry.asMultiPolyline() if geometry.isMultipart() else [geometry.asPolyline()]
+                            for line in lines:
+                                if not line:
+                                    continue
+                                first = line[0]
+                                poly = [[first.y() * mul, first.x() * mul]]
+                                for pt in line[1:]:
                                     delta_lat = (pt.y() - first.y()) * mul
                                     delta_lon = (pt.x() - first.x()) * mul
-                                    outer_poly.append([delta_lat, delta_lon])
-                                outers.append(outer_poly)
-                            # Inners
-                            for inner_ring in poly[1:]:
-                                if inner_ring:
-                                    first = inner_ring[0]
-                                    inner_poly = [[first.y() * mul, first.x() * mul]]
-                                    for pt in inner_ring[1:]:
+                                    poly.append([delta_lat, delta_lon])
+                                outers.append(poly)
+
+                        elif shape == POLYGON_TYPE:
+                            polys = geometry.asMultiPolygon() if geometry.isMultipart() else [geometry.asPolygon()]
+                            for poly in polys:
+                                if not poly:
+                                    continue
+                                # Внешнее кольцо
+                                outer_ring = poly[0]
+                                if outer_ring:
+                                    first = outer_ring[0]
+                                    outer_poly = [[first.y() * mul, first.x() * mul]]
+                                    for pt in outer_ring[1:]:
                                         delta_lat = (pt.y() - first.y()) * mul
                                         delta_lon = (pt.x() - first.x()) * mul
-                                        inner_poly.append([delta_lat, delta_lon])
-                                    inners.append(inner_poly)
+                                        outer_poly.append([delta_lat, delta_lon])
+                                    outers.append(outer_poly)
+                                # Внутренние кольца
+                                for inner_ring in poly[1:]:
+                                    if inner_ring:
+                                        first = inner_ring[0]
+                                        inner_poly = [[first.y() * mul, first.x() * mul]]
+                                        for pt in inner_ring[1:]:
+                                            delta_lat = (pt.y() - first.y()) * mul
+                                            delta_lon = (pt.x() - first.x()) * mul
+                                            inner_poly.append([delta_lat, delta_lon])
+                                        inners.append(inner_poly)
 
-                    cls['objects'].append([outers, inners, attrs])
+                        cls['objects'].append([outers, inners, attrs])
+                finally:
+                    renderer.stopRender(ctx)
 
                 obj['classes'].append(cls)
 
