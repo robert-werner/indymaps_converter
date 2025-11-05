@@ -65,14 +65,10 @@ class IndyMapsConverterDialog(QtWidgets.QDialog, FORM_CLASS):
 
     def custom_encoder(self, encoder, value):
         """Custom encoder for unsupported types"""
-        if isinstance(value, set):
-            encoder.encode(list(value))
-        elif isinstance(value, datetime):
-            encoder.encode(value.isoformat())
-        elif hasattr(value, '__dict__'):
+        if hasattr(value, '__dict__'):
             encoder.encode(value.__dict__)
         else:
-            encoder.encode(str(value))
+            encoder.encode(value)
 
     def _decode_rgba(self, color_int):
         """Декодирование RGBA из целого числа"""
@@ -617,7 +613,7 @@ class IndyMapsConverterDialog(QtWidgets.QDialog, FORM_CLASS):
                         # Геометрия -> формат IMX
                         if shape == POINT_TYPE:
                             pts = geometry.asMultiPoint() if geometry.isMultipart() else [geometry.asPoint()]
-                            outers = [[[p.y() * mul, p.x() * mul]] for p in pts]
+                            outers = [[[int(p.y() * mul), int(p.x() * mul)]] for p in pts]
 
                         elif shape == LINE_TYPE:
                             lines = geometry.asMultiPolyline() if geometry.isMultipart() else [geometry.asPolyline()]
@@ -625,10 +621,10 @@ class IndyMapsConverterDialog(QtWidgets.QDialog, FORM_CLASS):
                                 if not line:
                                     continue
                                 first = line[0]
-                                poly = [[first.y() * mul, first.x() * mul]]
+                                poly = [[int(first.y() * mul), int(first.x() * mul)]]
                                 for pt in line[1:]:
-                                    delta_lat = (pt.y() - first.y()) * mul
-                                    delta_lon = (pt.x() - first.x()) * mul
+                                    delta_lat = int((pt.y() - first.y()) * mul)
+                                    delta_lon = int((pt.x() - first.x()) * mul)
                                     poly.append([delta_lat, delta_lon])
                                 outers.append(poly)
 
@@ -641,20 +637,20 @@ class IndyMapsConverterDialog(QtWidgets.QDialog, FORM_CLASS):
                                 outer_ring = poly[0]
                                 if outer_ring:
                                     first = outer_ring[0]
-                                    outer_poly = [[first.y() * mul, first.x() * mul]]
+                                    outer_poly = [[int(first.y() * mul), int(first.x() * mul)]]
                                     for pt in outer_ring[1:]:
-                                        delta_lat = (pt.y() - first.y()) * mul
-                                        delta_lon = (pt.x() - first.x()) * mul
+                                        delta_lat = int((pt.y() - first.y()) * mul)
+                                        delta_lon = int((pt.x() - first.x()) * mul)
                                         outer_poly.append([delta_lat, delta_lon])
                                     outers.append(outer_poly)
                                 # Внутренние кольца
                                 for inner_ring in poly[1:]:
                                     if inner_ring:
                                         first = inner_ring[0]
-                                        inner_poly = [[first.y() * mul, first.x() * mul]]
+                                        inner_poly = [[int(first.y() * mul), int(first.x() * mul)]]
                                         for pt in inner_ring[1:]:
-                                            delta_lat = (pt.y() - first.y()) * mul
-                                            delta_lon = (pt.x() - first.x()) * mul
+                                            delta_lat = int((pt.y() - first.y()) * mul)
+                                            delta_lon = int((pt.x() - first.x()) * mul)
                                             inner_poly.append([delta_lat, delta_lon])
                                         inners.append(inner_poly)
 
@@ -666,7 +662,7 @@ class IndyMapsConverterDialog(QtWidgets.QDialog, FORM_CLASS):
 
             imx_path = self.exportFileQgsWidget.filePath()
             with open(imx_path, 'wb') as fp:
-                dump(obj, fp, default=self.custom_encoder)
+                dump(obj, fp, default=self.custom_encoder, indefinite_containers=True)
 
         finally:
             self.exportButton.setEnabled(True)
