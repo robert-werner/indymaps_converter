@@ -489,11 +489,11 @@ class IndyMapsConverterDialog(QtWidgets.QDialog, FORM_CLASS):
                 ymin = preset_extent.yMinimum()
                 xmax = preset_extent.xMaximum()
                 ymax = preset_extent.yMaximum()
-                abs_first = [ymax * mul, xmin * mul]  # [lat_mul, lon_mul]
+                abs_first = [int(round(ymax * mul)), int(round(xmin * mul))]  # [lat_mul, lon_mul]
                 polygon = [abs_first]
-                polygon.append([0, (xmax - xmin) * mul])  # top-right
-                polygon.append([(ymin - ymax) * mul, 0])  # bottom-right
-                polygon.append([0, (xmin - xmax) * mul])  # bottom-left
+                polygon.append([0, int(round((xmax - xmin) * mul))])  # top-right
+                polygon.append([int(round((ymin - ymax) * mul)), 0])  # bottom-right
+                polygon.append([0, int(round((xmin - xmax) * mul))])  # bottom-left
                 obj['borders'] = [polygon]
 
             # Рекурсивный проход по дереву слоев
@@ -613,7 +613,7 @@ class IndyMapsConverterDialog(QtWidgets.QDialog, FORM_CLASS):
                         # Геометрия -> формат IMX
                         if shape == POINT_TYPE:
                             pts = geometry.asMultiPoint() if geometry.isMultipart() else [geometry.asPoint()]
-                            outers = [[[int(p.y() * mul), int(p.x() * mul)]] for p in pts]
+                            outers = [[[round(p.y() * mul), round(p.x() * mul)]] for p in pts]
 
                         elif shape == LINE_TYPE:
                             lines = geometry.asMultiPolyline() if geometry.isMultipart() else [geometry.asPolyline()]
@@ -621,10 +621,10 @@ class IndyMapsConverterDialog(QtWidgets.QDialog, FORM_CLASS):
                                 if not line:
                                     continue
                                 first = line[0]
-                                poly = [[int(first.y() * mul), int(first.x() * mul)]]
+                                poly = [[round(first.y() * mul), round(first.x() * mul)]]
                                 for pt in line[1:]:
-                                    delta_lat = int((pt.y() - first.y()) * mul)
-                                    delta_lon = int((pt.x() - first.x()) * mul)
+                                    delta_lat = round((pt.y() - first.y()) * mul)
+                                    delta_lon = round((pt.x() - first.x()) * mul)
                                     poly.append([delta_lat, delta_lon])
                                 outers.append(poly)
 
@@ -637,20 +637,20 @@ class IndyMapsConverterDialog(QtWidgets.QDialog, FORM_CLASS):
                                 outer_ring = poly[0]
                                 if outer_ring:
                                     first = outer_ring[0]
-                                    outer_poly = [[int(first.y() * mul), int(first.x() * mul)]]
+                                    outer_poly = [[round(first.y() * mul), round(first.x() * mul)]]
                                     for pt in outer_ring[1:]:
-                                        delta_lat = int((pt.y() - first.y()) * mul)
-                                        delta_lon = int((pt.x() - first.x()) * mul)
+                                        delta_lat = round((pt.y() - first.y()) * mul)
+                                        delta_lon = round((pt.x() - first.x()) * mul)
                                         outer_poly.append([delta_lat, delta_lon])
                                     outers.append(outer_poly)
                                 # Внутренние кольца
                                 for inner_ring in poly[1:]:
                                     if inner_ring:
                                         first = inner_ring[0]
-                                        inner_poly = [[int(first.y() * mul), int(first.x() * mul)]]
+                                        inner_poly = [[round(first.y() * mul), round(first.x() * mul)]]
                                         for pt in inner_ring[1:]:
-                                            delta_lat = int((pt.y() - first.y()) * mul)
-                                            delta_lon = int((pt.x() - first.x()) * mul)
+                                            delta_lat = round((pt.y() - first.y()) * mul)
+                                            delta_lon = round((pt.x() - first.x()) * mul)
                                             inner_poly.append([delta_lat, delta_lon])
                                         inners.append(inner_poly)
 
